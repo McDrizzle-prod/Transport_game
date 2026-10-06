@@ -1,0 +1,115 @@
+// Dutch texts for codes coming from the engine and the server.
+import { CARGO, STATIONS, TRANSPORT, VEHICLES } from '@transport/shared';
+import type { Action, CargoId, Msg, StationKind, TransportKind, VehicleModelId } from '@transport/shared';
+import { money, num } from './format';
+
+export const GAME_TITLE = 'Transportrijk';
+
+const REASONS: Record<string, string> = {
+  bounds: 'buiten de kaart',
+  terrain: 'ongeschikt terrein',
+  city: 'bebouwing van een stad',
+  industry: 'een industrie',
+  hq: 'een hoofdkantoor',
+  station: 'een station van een ander type of van een andere speler',
+  occupied: 'een tegel van een andere speler',
+  mixed: 'andere infrastructuur',
+  no_water: 'er is geen water naast deze plek',
+};
+
+export const reasonText = (reason: unknown): string => REASONS[String(reason)] ?? String(reason);
+
+export function msgText(m: Msg, playerName: (id: string) => string = (id) => id): string {
+  switch (m.code) {
+    case 'insufficient_funds':
+      return `Onvoldoende geld: nodig ${money(Number(m.cost))}, beschikbaar ${money(Number(m.money))}`;
+    case 'path_too_short':
+      return 'De route is te kort';
+    case 'path_too_long':
+      return `De route is te lang (max. ${m.max} stukken per actie)`;
+    case 'path_invalid':
+      return 'Ongeldige route';
+    case 'path_blocked':
+      return `De route loopt over ${reasonText(m.reason)}`;
+    case 'station_invalid':
+      return `Station kan daar niet: ${reasonText(m.reason)}`;
+    case 'station_exists':
+      return 'Daar staat al een station van jou';
+    case 'nothing_to_build':
+      return 'Niets nieuws te bouwen: dit deel van je netwerk bestaat al';
+    case 'station_conflict':
+      return 'Station geweigerd: een andere speler bouwde in hetzelfde slot een ander soort station op deze tegel';
+    case 'station_missing':
+      return 'Geen station op het begin- of eindpunt (bouw het in een eerder actieslot)';
+    case 'same_station':
+      return 'Begin en eind zijn hetzelfde station';
+    case 'station_kind':
+      return 'Dit voertuig past niet bij dit soort station';
+    case 'station_not_owned':
+      return 'Je kunt alleen je eigen stations gebruiken';
+    case 'not_connected':
+      return 'De stations zijn niet met jouw netwerk verbonden';
+    case 'invalid_action':
+      return 'Ongeldige actie';
+    case 'crossing':
+      return `Kruist een route van ${playerName(String(m.owner))}`;
+    default:
+      return errorText(m.code);
+  }
+}
+
+const ERRORS: Record<string, string> = {
+  network: 'Geen verbinding met de server',
+  game_not_found: 'Spel niet gevonden. Controleer de code.',
+  name_required: 'Vul een naam in',
+  name_taken: 'Die naam is al in gebruik in dit spel',
+  game_full: 'Dit spel zit vol',
+  game_finished: 'Dit spel is afgelopen',
+  unauthorized: 'Je bent geen speler in dit spel',
+  host_only: 'Alleen de host kan dit doen',
+  hq_invalid: 'Ongeldige plek',
+  hq_terrain: 'Een hoofdkantoor kan niet op water of bergen',
+  hq_occupied: 'Deze plek is al bezet',
+  hq_too_close: 'Te dicht bij een ander hoofdkantoor',
+  hq_fixed: 'Je hoofdkantoor staat al vast',
+  not_running: 'Het spel is nog niet gestart',
+  no_hq: 'Plaats eerst je hoofdkantoor',
+  already_started: 'Het spel is al gestart',
+  no_hq_placed: 'Er moet minstens één hoofdkantoor geplaatst zijn',
+  slots_invalid: 'Ongeldige acties',
+  too_large: 'Verzoek te groot',
+  invalid_json: 'Ongeldig verzoek',
+  internal: 'Er ging iets mis op de server',
+  report_not_found: 'Rapport niet gevonden',
+  unreachable: 'Geen route mogelijk naar dit punt',
+  too_long: 'Route te lang voor één actie: zet een tussenpunt dichterbij of bouw in stukken',
+  blocked_endpoint: 'Daar kun je niet bouwen',
+};
+
+export function errorText(code: string): string {
+  if (/^slot_\d_invalid$/.test(code)) return `Actieslot ${code.split('_')[1]} is ongeldig`;
+  return ERRORS[code] ?? code;
+}
+
+export const transportName = (k: TransportKind): string => TRANSPORT[k].name;
+export const stationName = (k: StationKind): string => STATIONS[k].name;
+export const vehicleName = (m: VehicleModelId): string => VEHICLES[m].name;
+export const cargoLabel = (c: CargoId): string => `${CARGO[c].icon} ${CARGO[c].name}`;
+
+export const TRANSPORT_ICON: Record<TransportKind, string> = { road: '🛣️', rail: '🛤️', canal: '🌊' };
+
+/** One line describing an action in a slot. */
+export function actionTitle(a: Action, width: number): string {
+  switch (a.type) {
+    case 'build': {
+      const extra = [a.stationStart && 'station begin', a.stationEnd && 'station eind'].filter(Boolean).join(' + ');
+      return `${TRANSPORT_ICON[a.kind]} ${transportName(a.kind)} · ${num(a.path.length - 1)} stukken${extra ? ` · ${extra}` : ''}`;
+    }
+    case 'station':
+      return `${STATIONS[a.kind].icon} ${stationName(a.kind)} op (${a.tile % width}, ${Math.floor(a.tile / width)})`;
+    case 'vehicles':
+      return `${VEHICLES[a.model].icon} ${a.count}× ${vehicleName(a.model)}`;
+  }
+}
+
+export const OUTCOME_TEXT = { ok: 'Gelukt', partial: 'Deels gelukt', failed: 'Mislukt' } as const;
