@@ -124,7 +124,7 @@ function SlotRow({ index, action, result, highlighted }: { index: number; action
       <div className="slot-body">
         <div className="slot-title">{actionTitle(action, width)}</div>
         <div className="slot-sub">
-          <span>{money(result?.cost ?? 0)}</span>
+          <span>{(result?.cost ?? 0) < 0 ? `${money(-(result?.cost ?? 0))} terug` : money(result?.cost ?? 0)}</span>
           <span className={`badge ${status}`}>{status === 'ok' ? 'Haalbaar' : OUTCOME_TEXT[status]}</span>
           {estimate && <span className="estimate">{estimate}</span>}
         </div>
@@ -143,7 +143,7 @@ function SlotRow({ index, action, result, highlighted }: { index: number; action
         <button className="icon-btn" title="Later uitvoeren" disabled={index === ACTION_SLOTS - 1} onClick={() => store.moveSlot(index, 1)}>
           ▼
         </button>
-        <button className="icon-btn" title="Bewerken" onClick={() => store.editSlot(index)}>
+        <button className="icon-btn" title="Bewerken" disabled={action.type === 'sell'} onClick={() => store.editSlot(index)}>
           ✎
         </button>
         <button className="icon-btn danger" title="Verwijderen" onClick={() => store.removeSlot(index)}>

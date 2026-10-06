@@ -54,7 +54,7 @@ export function resolveTurn(map: MapData, previous: GameState, orders: Record<Pl
       if (action) entries.push({ player, action });
     }
     for (const r of executeSlot(world, slot, entries)) {
-      if (r.action.type === 'vehicles') fin[r.player].vehicles += r.cost;
+      if (r.action.type === 'vehicles' || r.action.type === 'sell') fin[r.player].vehicles += r.cost;
       else fin[r.player].construction += r.cost;
       report.slots.push(r);
     }

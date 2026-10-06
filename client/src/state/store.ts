@@ -169,6 +169,12 @@ export class GameStore {
     // Headquarters just placed or moved: done with the placement tool.
     if (me && me.hq !== null && me.hq !== prevHq && this.state.tool.kind === 'hq') patch.tool = { kind: 'inspect' };
     this.set(patch);
+    const meId = view.you?.playerId;
+    if (prev && meId) {
+      const had = new Set(prev.game.invites.filter((i) => i.to === meId).map((i) => i.from));
+      const fresh = view.game.invites.find((i) => i.to === meId && !had.has(i.from));
+      if (fresh) this.toast(`${this.playerName(fresh.from)} stelt een alliantie voor (zie Spelers)`, 'info');
+    }
     if (view.lastReportTurn !== null && view.lastReportTurn !== this.state.report?.turn) {
       void this.loadReport(view.lastReportTurn, turnChanged);
     }
@@ -334,9 +340,18 @@ export class GameStore {
       });
     } else if (a.type === 'station') {
       this.setTool({ kind: 'station', station: a.kind, tile: a.tile, editSlot: i });
-    } else {
+    } else if (a.type === 'vehicles') {
       this.setTool({ kind: 'vehicles', from: a.from, to: a.to, model: a.model, count: a.count, editSlot: i });
     }
+  }
+
+  /** Tile that represents an action on the map (for focusing the camera). */
+  actionTile(a: Action): number | null {
+    if (a.type === 'build') return a.path[Math.floor(a.path.length / 2)];
+    if (a.type === 'station') return a.tile;
+    if (a.type === 'vehicles') return a.from;
+    const line = this.state.view?.game.lines.find((l) => l.id === a.line);
+    return this.state.view?.game.stations.find((st) => st.id === line?.stations[0])?.tile ?? null;
   }
 
   // --- Tools & map interaction ---------------------------------------------------
@@ -379,8 +394,8 @@ export class GameStore {
         const world = this.planningWorld();
         const station = world?.stationAt.get(tile);
         const me = this.state.view?.you?.playerId;
-        if (!station || !me || !station.owners.includes(me)) {
-          this.toast('Tik op een van je eigen stations (ook geplande stations tellen mee).', 'info');
+        if (!station || !me || !world?.canUse(station.owners, me)) {
+          this.toast('Tik op een station van jou of een bondgenoot (geplande stations tellen ook).', 'info');
           return;
         }
         if (tool.from === null || (tool.from !== null && tool.to !== null)) {
@@ -408,7 +423,8 @@ export class GameStore {
   highlight(slot: number | null): void {
     this.set({ highlightSlot: slot });
     const a = slot !== null ? this.state.draft[slot] : null;
-    if (a) this.focusTile(a.type === 'build' ? a.path[Math.floor(a.path.length / 2)] : a.type === 'station' ? a.tile : a.from);
+    const tile = a ? this.actionTile(a) : null;
+    if (tile !== null) this.focusTile(tile);
   }
 
   setInsets(insets: Insets): void {
@@ -461,6 +477,24 @@ export class GameStore {
       await api.start(gameId, identity.token);
       this.set({ tool: { kind: 'inspect' }, tab: 'actions' });
       this.toast('Het spel is gestart! Plan je eerste acties.', 'ok');
+    } catch (err) {
+      this.toast(errorText(err instanceof ApiError ? err.code : 'network'), 'error');
+    }
+  }
+
+  async alliance(action: 'invite' | 'accept' | 'decline' | 'leave', player?: string): Promise<void> {
+    const { identity, gameId } = this.state;
+    if (!identity) return;
+    try {
+      await api.alliance(gameId, identity.token, action, player);
+      const name = player ? this.playerName(player) : '';
+      const text = {
+        invite: `Alliantie voorgesteld aan ${name}`,
+        accept: `Je bent nu bondgenoot van ${name}`,
+        decline: 'Voorstel geweigerd',
+        leave: 'Je hebt de alliantie verlaten',
+      }[action];
+      this.toast(text, 'ok');
     } catch (err) {
       this.toast(errorText(err instanceof ApiError ? err.code : 'network'), 'error');
     }

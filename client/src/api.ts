@@ -60,6 +60,8 @@ export const api = {
   setOrders: (id: string, token: string, slots: OrderSlots, ready: boolean) =>
     call('PUT', `/api/games/${id}/orders`, { slots, ready }, token),
   resolve: (id: string, token: string) => call('POST', `/api/games/${id}/resolve`, {}, token),
+  alliance: (id: string, token: string, action: 'invite' | 'accept' | 'decline' | 'leave', player?: string) =>
+    call('POST', `/api/games/${id}/alliance`, { action, player }, token),
 };
 
 function wsUrl(gameId: string, token: string | null): string {

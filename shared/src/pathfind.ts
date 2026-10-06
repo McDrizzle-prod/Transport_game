@@ -11,9 +11,9 @@ export interface Route {
   length: number;
 }
 
-/** Whether a player may drive over an edge. Alliances will extend this later. */
-export function edgeUsable(edge: Edge, player: PlayerId): boolean {
-  return edge.owners.includes(player);
+/** Whether a player may drive over an edge (own or allied). */
+export function edgeUsable(world: World, edge: Edge, player: PlayerId): boolean {
+  return world.canUse(edge.owners, player);
 }
 
 const isWater = (world: World, t: number) => world.map.terrain[t] === Terrain.Water;
@@ -35,7 +35,7 @@ function forEachMove(
   const grid = world.grid;
   if (kind === 'road' || kind === 'rail') {
     for (const e of world.edgesAt(tile)) {
-      if (e.kind !== kind || !edgeUsable(e, player)) continue;
+      if (e.kind !== kind || !edgeUsable(world, e, player)) continue;
       const other = e.a === tile ? e.b : e.a;
       visit(other, stepLength(grid, tile, other));
     }
@@ -50,7 +50,7 @@ function forEachMove(
 
   // Ships: open water is free for everybody, canals need a usable canal edge.
   for (const e of world.edgesAt(tile)) {
-    if (e.kind !== 'canal' || !edgeUsable(e, player)) continue;
+    if (e.kind !== 'canal' || !edgeUsable(world, e, player)) continue;
     const other = e.a === tile ? e.b : e.a;
     visit(other, stepLength(grid, tile, other));
   }
@@ -73,7 +73,7 @@ function forEachMove(
 }
 
 function hasUsableCanal(world: World, player: PlayerId, tile: number): boolean {
-  return world.edgesAt(tile).some((e) => e.kind === 'canal' && edgeUsable(e, player));
+  return world.edgesAt(tile).some((e) => e.kind === 'canal' && edgeUsable(world, e, player));
 }
 
 /** A* from one station tile to another. Returns null when the network does not connect them. */

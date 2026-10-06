@@ -333,7 +333,8 @@ class MapController {
     }
     const markers: SlotMarker[] = [];
     s.draft.forEach((a, i) => {
-      if (a) markers.push(markerFor(a, i, preview?.results[i] ?? null, map.width, s.highlightSlot === i));
+      const tile = a ? this.store.actionTile(a) : null;
+      if (a && tile !== null) markers.push(markerFor(a, i, tile, preview?.results[i] ?? null, map.width, s.highlightSlot === i));
     });
 
     let vehicles = this.staticVehicles(world);
@@ -411,7 +412,7 @@ class MapController {
       case 'vehicles': {
         const world = this.store.planningWorld();
         const kind = VEHICLES[tool.model].kind;
-        const candidates = world ? world.state.stations.filter((st) => st.kind === kind && st.owners.includes(me)).map((st) => st.tile) : [];
+        const candidates = world ? world.state.stations.filter((st) => st.kind === kind && world.canUse(st.owners, me)).map((st) => st.tile) : [];
         return { kind: 'vehicles', from: tool.from, to: tool.to, hover: s.hover, candidates };
       }
       case 'hq': {
@@ -538,15 +539,15 @@ class MapController {
   }
 }
 
-function markerFor(a: Action, i: number, result: SlotResult | null, width: number, highlighted: boolean): SlotMarker {
+function markerFor(a: Action, i: number, tile: number, result: SlotResult | null, width: number, highlighted: boolean): SlotMarker {
   const c = (t: number): [number, number] => [(t % width) + 0.5, Math.floor(t / width) + 0.5];
   const status = result?.outcome ?? 'ok';
   if (a.type === 'build') {
-    const [x, y] = c(a.path[Math.floor(a.path.length / 2)]);
+    const [x, y] = c(tile);
     return { slot: i + 1, x, y, status, highlighted, path: a.path, kind: a.kind };
   }
-  if (a.type === 'station') {
-    const [x, y] = c(a.tile);
+  if (a.type === 'station' || a.type === 'sell') {
+    const [x, y] = c(tile);
     return { slot: i + 1, x: x + 0.45, y: y - 0.45, status, highlighted };
   }
   const [fx, fy] = c(a.from);

@@ -46,6 +46,11 @@ export function sanitizeAction(grid: Grid, raw: unknown): Action | null {
       if (!isInt(r.count) || r.count < 1 || r.count > MAX_VEHICLES_PER_ACTION) return null;
       return { type: 'vehicles', model: r.model as VehicleModelId, from: r.from, to: r.to, count: r.count };
     }
+    case 'sell': {
+      if (!isInt(r.line) || r.line < 1) return null;
+      if (!isInt(r.count) || r.count < 1 || r.count > MAX_VEHICLES_PER_ACTION) return null;
+      return { type: 'sell', line: r.line, count: r.count };
+    }
     default:
       return null;
   }

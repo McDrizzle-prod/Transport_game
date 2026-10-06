@@ -1,6 +1,7 @@
 // Keeps games in memory and persists every game as a JSON file (good enough for a proof of concept).
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { migrateState } from '@transport/shared';
 import type { GameState, MapData, PlayerId, PlayerOrders, TurnReport } from '@transport/shared';
 
 export interface StoredGame {
@@ -31,6 +32,7 @@ export class GameStore {
       if (!file.endsWith('.json')) continue;
       try {
         const game = JSON.parse(await readFile(path.join(this.dir, file), 'utf8')) as StoredGame;
+        migrateState(game.state);
         this.games.set(game.state.id, game);
       } catch (err) {
         console.error(`[store] could not load ${file}:`, err);

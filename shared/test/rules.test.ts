@@ -140,6 +140,33 @@ describe('building routes', () => {
     expect(rightOrder.report.finances.A.vehicles).toBe(2 * VEHICLES.truck.price);
   });
 
+  it('sells vehicles of a line for half their price', () => {
+    const w = makeWorld({ width: 30, height: 12 });
+    const path = hPath(w, 3, 13, 5);
+    const first = resolveTurn(
+      w.map,
+      w.state,
+      {
+        A: slots(
+          { type: 'build', kind: 'road', path, stationStart: true, stationEnd: true },
+          { type: 'vehicles', model: 'truck', from: path[0], to: path[path.length - 1], count: 3 },
+        ),
+      },
+      0,
+    );
+    const line = first.state.lines[0].id;
+    const before = first.state.players[0].money;
+    const second = resolveTurn(w.map, first.state, { A: slots({ type: 'sell', line, count: 2 }) }, 0);
+    expect(second.report.slots[0].outcome).toBe('ok');
+    expect(second.report.slots[0].cost).toBe(-VEHICLES.truck.price);
+    expect(second.state.vehicles).toHaveLength(1);
+    // Refund minus the upkeep of the one remaining truck (no revenue: nothing to transport here).
+    expect(second.state.players[0].money).toBe(before + VEHICLES.truck.price - second.report.finances.A.upkeep);
+    // Other players can't sell your vehicles.
+    const third = resolveTurn(w.map, second.state, { B: slots({ type: 'sell', line, count: 1 }) }, 0);
+    expect(third.report.slots[0].messages[0].code).toBe('line_missing');
+  });
+
   it('only lets vehicles drive over the owner network', () => {
     const w = makeWorld({ width: 30, height: 12 });
     const path = hPath(w, 3, 13, 5);

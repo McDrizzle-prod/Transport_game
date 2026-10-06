@@ -60,6 +60,8 @@ export function createGame(id: string, name: string, settings: GameSettings, now
     lines: [],
     vehicles: [],
     market: initialMarket(map, industries),
+    alliances: [],
+    invites: [],
     nextId: 1,
   };
   return { state, map };

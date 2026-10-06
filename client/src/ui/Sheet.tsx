@@ -57,6 +57,7 @@ export function Sheet() {
   const open = useUi((s) => s.sheetOpen);
   const phase = useUi((s) => s.view!.game.phase);
   const hasReport = useUi((s) => s.report !== null);
+  const invited = useUi((s) => !!s.view?.game.invites.some((i) => i.to === s.view?.you?.playerId));
   return (
     <aside ref={ref} className={`sheet ${open ? 'open' : 'closed'}`}>
       <div className="sheet-tabs" role="tablist">
@@ -71,7 +72,7 @@ export function Sheet() {
           >
             <span>{t.icon}</span>
             <span className="sheet-tab-label">{t.id === 'actions' && phase === 'lobby' ? 'Start' : t.label}</span>
-            {t.id === 'report' && hasReport && <i className="dot" />}
+            {((t.id === 'report' && hasReport) || (t.id === 'players' && invited)) && <i className="dot" />}
           </button>
         ))}
         <button className="sheet-toggle" onClick={() => store.toggleSheet()} aria-label={open ? 'Paneel inklappen' : 'Paneel uitklappen'}>

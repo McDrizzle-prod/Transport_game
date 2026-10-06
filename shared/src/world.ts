@@ -13,11 +13,16 @@ export class World {
   readonly stationById = new Map<number, Station>();
   readonly lineById = new Map<number, Line>();
   private adjacency: Map<number, Edge[]> | null = null;
+  private readonly allies = new Map<PlayerId, Set<PlayerId>>();
 
   constructor(map: MapData, state: GameState) {
     this.map = map;
     this.state = state;
     this.grid = { width: map.width, height: map.height };
+    for (const a of state.alliances ?? []) {
+      const members = new Set(a.members);
+      for (const m of a.members) this.allies.set(m, members);
+    }
     for (const ind of state.industries) {
       this.industryById.set(ind.id, ind);
       for (let dy = 0; dy < ind.h; dy++) {
@@ -30,6 +35,18 @@ export class World {
       this.stationById.set(s.id, s);
     }
     for (const l of state.lines) this.lineById.set(l.id, l);
+  }
+
+  /** May `player` use infrastructure owned by `owners` (own or allied)? */
+  canUse(owners: PlayerId[], player: PlayerId): boolean {
+    if (owners.includes(player)) return true;
+    const allies = this.allies.get(player);
+    return !!allies && owners.some((o) => allies.has(o));
+  }
+
+  /** Stable text describing the player's alliance (for cache keys). */
+  allianceKey(player: PlayerId): string {
+    return [...(this.allies.get(player) ?? [])].sort().join(',');
   }
 
   player(id: PlayerId): Player {

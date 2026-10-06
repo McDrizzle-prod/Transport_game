@@ -48,6 +48,8 @@ export function makeWorld(opts: {
     lines: [],
     vehicles: [],
     market: initialMarket(map, []),
+    alliances: [],
+    invites: [],
     nextId: 1,
   };
   (opts.players ?? ['A', 'B']).forEach((id, k) => {

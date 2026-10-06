@@ -1,5 +1,5 @@
 // Details of the selected tile: industry, city, station, headquarters, infrastructure, terrain.
-import { CARGO, INDUSTRIES, STATIONS, TERRAIN, TRANSPORT, TileUse, VEHICLES, coversIndustry, stationCoverage } from '@transport/shared';
+import { CARGO, INDUSTRIES, STATIONS, TERRAIN, TRANSPORT, TileUse, VEHICLES, VEHICLE_RESALE, coversIndustry, stationCoverage } from '@transport/shared';
 import type { CargoId, Station } from '@transport/shared';
 import { money, num, tileLabel } from '../format';
 import { cargoLabel } from '../i18n';
@@ -189,17 +189,26 @@ function StationInfo({ station }: { station: Station }) {
           <ul className="plain small">
             {lines.map((l) => {
               const vs = view.game.vehicles.filter((v) => v.lineId === l.id);
+              const mine = l.owner === me && view.game.phase === 'running';
               return (
                 <li key={l.id}>
-                  <strong>{l.name}</strong> · {vs.length}× {vs[0] ? VEHICLES[vs[0].model].icon : ''} · {l.length ? `${l.length} tegels` : 'geen verbinding!'}
+                  <strong>
+                    {l.name} <span className="muted">(lijn {l.id})</span>
+                  </strong>{' '}
+                  · {vs.length}× {vs[0] ? VEHICLES[vs[0].model].icon : ''} · {l.length ? `${l.length} tegels` : 'geen verbinding!'}
                   {' · '}vorige beurt {money(l.stats.revenue)} ({l.stats.trips} ritten)
+                  {mine && vs.length > 0 && (
+                    <button className="link small" onClick={() => store.addAction({ type: 'sell', line: l.id, count: 1 })}>
+                      verkoop 1 voertuig ({money(VEHICLES[vs[0].model].price * VEHICLE_RESALE)})
+                    </button>
+                  )}
                 </li>
               );
             })}
           </ul>
         </>
       )}
-      {me && station.owners.includes(me) && view.game.phase === 'running' && (
+      {me && world?.canUse(station.owners, me) && view.game.phase === 'running' && (
         <button
           className="secondary"
           onClick={() =>

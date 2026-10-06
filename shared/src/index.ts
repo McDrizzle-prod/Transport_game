@@ -13,4 +13,5 @@ export * from './resolve';
 export * from './planner';
 export * from './validate';
 export * from './game';
+export * from './alliances';
 export * from './api';

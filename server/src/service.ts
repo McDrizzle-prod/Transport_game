@@ -3,7 +3,11 @@ import { randomBytes, randomInt } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   REPORTS_KEPT,
+  acceptAlliance,
   activePlayers,
+  declineAlliance,
+  inviteToAlliance,
+  leaveAlliance,
   addPlayer,
   createGame,
   emptySlots,
@@ -145,6 +149,33 @@ export class GameService {
     const result = sanitizeOrders(game.map, body?.slots);
     if (!result.ok) throw new ApiError(400, result.error);
     game.orders[playerId] = { slots: result.slots, ready: body?.ready === true, updatedAt: this.now() };
+    this.changed(game.state.id);
+  }
+
+  /** Alliance diplomacy: invite / accept / decline / leave. Takes effect immediately. */
+  alliance(id: string, token: string | null, body: { action?: unknown; player?: unknown }): void {
+    const game = this.game(id);
+    const playerId = this.requirePlayer(game, token);
+    const other = typeof body?.player === 'string' ? body.player : '';
+    const state = game.state;
+    let error;
+    switch (body?.action) {
+      case 'invite':
+        error = inviteToAlliance(state, playerId, other, this.now());
+        break;
+      case 'accept':
+        error = acceptAlliance(state, playerId, other);
+        break;
+      case 'decline':
+        error = declineAlliance(state, playerId, other);
+        break;
+      case 'leave':
+        error = leaveAlliance(state, playerId);
+        break;
+      default:
+        throw new ApiError(400, 'invalid_request');
+    }
+    if (error) throw new ApiError(409, error.code);
     this.changed(game.state.id);
   }
 

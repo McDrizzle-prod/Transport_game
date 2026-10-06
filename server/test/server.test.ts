@@ -129,6 +129,22 @@ describe('API', () => {
     ws.close();
   });
 
+  it('forms and leaves alliances through the API', async () => {
+    await start();
+    const a = await call<JoinResponse>('POST', '/api/games', { name: 'Diplomatie', playerName: 'Anna', settings: { mapSize: 48, seed: 4 } });
+    const b = await call<JoinResponse>('POST', `/api/games/${a.data.gameId}/join`, { name: 'Bram' });
+    const path = `/api/games/${a.data.gameId}/alliance`;
+    expect((await call('POST', path, { action: 'accept', player: a.data.playerId }, b.data.token)).data).toEqual({ error: 'no_invite' });
+    expect((await call('POST', path, { action: 'invite', player: b.data.playerId }, a.data.token)).status).toBe(200);
+    expect((await call('POST', path, { action: 'accept', player: a.data.playerId }, b.data.token)).status).toBe(200);
+    let view = (await call<ClientView>('GET', `/api/games/${a.data.gameId}/view`, undefined, a.data.token)).data;
+    expect(view.game.alliances[0].members.sort()).toEqual([a.data.playerId, b.data.playerId].sort());
+    expect((await call('POST', path, { action: 'leave' }, b.data.token)).status).toBe(200);
+    view = (await call<ClientView>('GET', `/api/games/${a.data.gameId}/view`, undefined, a.data.token)).data;
+    expect(view.game.alliances).toHaveLength(0);
+    expect((await call('POST', path, { action: 'dance' }, b.data.token)).status).toBe(400);
+  });
+
   it('lets the host execute a turn right away and rejects unknown games', async () => {
     await start();
     const host = await call<JoinResponse>('POST', '/api/games', { name: 'Snel', playerName: 'Host', settings: { mapSize: 48, seed: 9, schedule: { mode: 'manual' } } });

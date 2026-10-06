@@ -230,6 +230,19 @@ export interface MarketState {
   demand: CargoAmounts;
 }
 
+export interface Alliance {
+  id: number;
+  name: string;
+  members: PlayerId[];
+  formedTurn: number;
+}
+
+export interface AllianceInvite {
+  from: PlayerId;
+  to: PlayerId;
+  at: number;
+}
+
 export type GamePhase = 'lobby' | 'running' | 'finished';
 
 export interface GameState {
@@ -252,6 +265,9 @@ export interface GameState {
   lines: Line[];
   vehicles: Vehicle[];
   market: MarketState;
+  /** Allied players may use each other's roads, tracks, canals and stations. */
+  alliances: Alliance[];
+  invites: AllianceInvite[];
   nextId: number;
 }
 
@@ -282,7 +298,14 @@ export interface VehicleAction {
   count: number;
 }
 
-export type Action = BuildAction | StationAction | VehicleAction;
+export interface SellAction {
+  type: 'sell';
+  /** Line whose vehicles are sold. */
+  line: number;
+  count: number;
+}
+
+export type Action = BuildAction | StationAction | VehicleAction | SellAction;
 export type OrderSlots = (Action | null)[];
 
 export interface PlayerOrders {

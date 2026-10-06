@@ -8,6 +8,8 @@ export const TICKS_PER_TURN = 40;
 /** Maximum number of track/road segments one build action may contain. */
 export const MAX_ROUTE_EDGES = 64;
 export const MAX_VEHICLES_PER_ACTION = 5;
+/** Part of the purchase price you get back when selling a vehicle. */
+export const VEHICLE_RESALE = 0.5;
 /** Per station and cargo type; anything above this waits at the industry instead. */
 export const STATION_WAITING_CAP = 400;
 export const LOAD_TICKS = 1;

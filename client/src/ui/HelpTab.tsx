@@ -1,5 +1,5 @@
 // Short explanation of the rules.
-import { ACTION_SLOTS, OVERSUPPLY_PRICE_FACTOR, STATIONS, TICKS_PER_TURN, TRANSPORT, VEHICLES, VEHICLE_IDS } from '@transport/shared';
+import { ACTION_SLOTS, OVERSUPPLY_PRICE_FACTOR, STATIONS, TICKS_PER_TURN, TRANSPORT, VEHICLES, VEHICLE_IDS, VEHICLE_RESALE } from '@transport/shared';
 import { money } from '../format';
 
 export function HelpTab() {
@@ -40,7 +40,13 @@ export function HelpTab() {
         </li>
         <li>Je verdient pas als een voertuig aankomt. Langzame schepen doen soms meerdere beurten over één rit.</li>
         <li>Steden betalen boven hun vraag maar {Math.round(OVERSUPPLY_PRICE_FACTOR * 100)}% van de prijs. Marktprijzen dalen als iedereen hetzelfde levert.</li>
-        <li>Voertuigen, stations en infrastructuur kosten elke beurt onderhoud.</li>
+        <li>Voertuigen, stations en infrastructuur kosten elke beurt onderhoud. Te veel voertuigen? Verkoop ze (via de stationsinfo) voor {Math.round(VEHICLE_RESALE * 100)}% van de prijs.</li>
+      </ul>
+      <h4>Allianties</h4>
+      <ul>
+        <li>Stel via het tabblad Spelers een alliantie voor. Bondgenoten mogen elkaars wegen, sporen, kanalen en stations gebruiken en erop aansluiten.</li>
+        <li>Voor de conflictregels maakt een alliantie niets uit: ook tussen bondgenoten wint het laagste slot.</li>
+        <li>Verlaat je de alliantie, dan stoppen jouw voertuigen op het netwerk van je oud-bondgenoten.</li>
       </ul>
       <h4>Voertuigen</h4>
       <table className="flows">

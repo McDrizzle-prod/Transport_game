@@ -3,7 +3,7 @@
 // Conflict rule (per tile): slots are executed in order 1..5 for all players at the same time.
 // A tile claimed in an earlier slot belongs to that player, so a later claim on it fails.
 // When several players claim the same free tile in the same slot, all of them get it (shared tile).
-import { LOAD_TICKS, MAX_ROUTE_EDGES, MAX_VEHICLES_PER_ACTION, STATIONS, TERRAIN, TICKS_PER_TURN, TRANSPORT, VEHICLES } from './config';
+import { LOAD_TICKS, MAX_ROUTE_EDGES, MAX_VEHICLES_PER_ACTION, STATIONS, TERRAIN, TICKS_PER_TURN, TRANSPORT, VEHICLES, VEHICLE_RESALE } from './config';
 import { crossingPair, distToRect, edgeKey, isAdjacent, neighbor, stepLength, tileX, tileY, validTile } from './geometry';
 import { findRoute } from './pathfind';
 import { Terrain, TileUse } from './types';
@@ -14,6 +14,7 @@ import type {
   LostTile,
   Msg,
   PlayerId,
+  SellAction,
   SlotResult,
   Station,
   StationAction,
@@ -57,12 +58,12 @@ export function checkRouteTile(world: World, player: PlayerId, kind: TransportKi
   const station = world.stationAt.get(tile);
   if (station) {
     if (STATIONS[station.kind].transport !== kind) return blocked('station', station.owners);
-    if (!station.owners.includes(player)) return blocked('station', station.owners);
+    if (!world.canUse(station.owners, player)) return blocked('station', station.owners);
     return { ok: true, claim: false };
   }
   const info = world.tile(tile);
   if (info && info.owners.length > 0) {
-    return info.owners.includes(player) ? { ok: true, claim: false } : blocked('occupied', info.owners);
+    return world.canUse(info.owners, player) ? { ok: true, claim: false } : blocked('occupied', info.owners);
   }
   return { ok: true, claim: true };
 }
@@ -80,11 +81,11 @@ export function checkStationTile(world: World, player: PlayerId, kind: StationKi
   if (!TERRAIN[world.map.terrain[tile] as keyof typeof TERRAIN].buildable) return { ok: false, reason: 'terrain', owners: [] };
   const existing = world.stationAt.get(tile);
   if (existing) {
-    if (existing.kind === kind && existing.owners.includes(player)) return { ok: true, claim: false, exists: true };
+    if (existing.kind === kind && world.canUse(existing.owners, player)) return { ok: true, claim: false, exists: true };
     return { ok: false, reason: 'station', owners: existing.owners };
   }
   const info = world.tile(tile);
-  if (info && info.owners.length > 0 && !info.owners.includes(player)) {
+  if (info && info.owners.length > 0 && !world.canUse(info.owners, player)) {
     return { ok: false, reason: 'occupied', owners: info.owners };
   }
   const transport = STATIONS[kind].transport;
@@ -207,7 +208,7 @@ export function planBuild(world: World, player: PlayerId, action: BuildAction): 
     if (lost.has(a) || lost.has(b) || !edgeNeeded(world, kind, a, b)) continue;
     const key = edgeKey(kind, a, b);
     const existing = world.edge(key);
-    if (existing && existing.owners.includes(player)) continue;
+    if (existing && world.canUse(existing.owners, player)) continue;
     const crossing = crossingOwners(world, a, b);
     if (crossing) {
       plan.blocked.push({ tile: b, owners: crossing, reason: 'occupied' });
@@ -333,7 +334,7 @@ export function executeSlot(world: World, slot: number, entries: SlotEntry[]): S
   for (const { player, action } of sorted) {
     const result = newResult(slot, player, action);
     results.push(result);
-    if (action.type === 'vehicles') continue;
+    if (action.type === 'vehicles' || action.type === 'sell') continue;
     const plan = planAction(world, player, action);
     if (plan.fatal) {
       result.outcome = 'failed';
@@ -451,8 +452,34 @@ export function executeSlot(world: World, slot: number, entries: SlotEntry[]): S
   // 5. Vehicles, after this slot's construction.
   for (const result of results) {
     if (result.action.type === 'vehicles') executeVehicles(world, result, result.action);
+    else if (result.action.type === 'sell') executeSell(world, result, result.action);
   }
   return results;
+}
+
+/** Sells vehicles of a line for part of their price (newest first). The refund is a negative cost. */
+function executeSell(world: World, result: SlotResult, action: SellAction): void {
+  const line = world.lineById.get(action.line);
+  if (!line || line.owner !== result.player) {
+    result.outcome = 'failed';
+    result.messages.push({ code: 'line_missing' });
+    return;
+  }
+  const vehicles = world.state.vehicles.filter((v) => v.lineId === line.id).sort((a, b) => b.id - a.id);
+  const sold = vehicles.slice(0, Math.max(1, Math.min(MAX_VEHICLES_PER_ACTION, Math.floor(action.count))));
+  if (sold.length === 0) {
+    result.outcome = 'failed';
+    result.messages.push({ code: 'nothing_to_sell' });
+    return;
+  }
+  const refund = sold.reduce((sum, v) => sum + Math.round(VEHICLES[v.model].price * VEHICLE_RESALE), 0);
+  const ids = new Set(sold.map((v) => v.id));
+  world.state.vehicles = world.state.vehicles.filter((v) => !ids.has(v.id));
+  world.player(result.player).money += refund;
+  result.cost = -refund;
+  result.vehicles = [...ids];
+  result.lineId = line.id;
+  if (sold.length < action.count) result.messages.push({ code: 'sold_fewer', count: sold.length });
 }
 
 function findOrCreateLine(world: World, player: PlayerId, kind: StationKind, a: Station, b: Station): Line {
@@ -491,7 +518,7 @@ function executeVehicles(world: World, result: SlotResult, action: VehicleAction
   if (!to) return fail('station_missing', { tile: action.to });
   if (from.id === to.id) return fail('same_station');
   if (from.kind !== model.kind || to.kind !== model.kind) return fail('station_kind', { kind: model.kind });
-  if (!from.owners.includes(player) || !to.owners.includes(player)) return fail('station_not_owned');
+  if (!world.canUse(from.owners, player) || !world.canUse(to.owners, player)) return fail('station_not_owned');
   const route = findRoute(world, player, model.kind, from.tile, to.tile);
   if (!route) return fail('not_connected');
   const count = Math.max(1, Math.min(MAX_VEHICLES_PER_ACTION, Math.floor(action.count)));

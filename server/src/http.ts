@@ -121,6 +121,7 @@ export function createHttpHandler(service: GameService, clientDist: string | nul
     route('POST', '/api/games/:id/start', ({ params, token }) => service.start(params.id, token)),
     route('PUT', '/api/games/:id/orders', ({ params, token, body }) => service.setOrders(params.id, token, body as never)),
     route('POST', '/api/games/:id/resolve', ({ params, token }) => service.resolveNow(params.id, token)),
+    route('POST', '/api/games/:id/alliance', ({ params, token, body }) => service.alliance(params.id, token, body as never)),
   ];
 
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {

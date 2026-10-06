@@ -1519,3 +1519,28 @@ ul.plain {
   font-size: 0.95rem;
   margin: 6px 0;
 }
+
+.invite-card,
+.alliance-box {
+  background: rgba(255, 213, 74, 0.1);
+  border: 1px solid rgba(255, 213, 74, 0.35);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+}
+
+.alliance-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: rgba(87, 187, 91, 0.1);
+  border-color: rgba(87, 187, 91, 0.4);
+  margin-top: 4px;
+}
+
+.player-main .link {
+  align-self: flex-start;
+  padding: 2px 0;
+}

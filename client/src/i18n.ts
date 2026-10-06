@@ -46,11 +46,17 @@ export function msgText(m: Msg, playerName: (id: string) => string = (id) => id)
     case 'station_kind':
       return 'Dit voertuig past niet bij dit soort station';
     case 'station_not_owned':
-      return 'Je kunt alleen je eigen stations gebruiken';
+      return 'Je kunt alleen stations van jezelf of je bondgenoten gebruiken';
     case 'not_connected':
-      return 'De stations zijn niet met jouw netwerk verbonden';
+      return 'De stations zijn niet verbonden via jouw netwerk (of dat van je bondgenoten)';
     case 'invalid_action':
       return 'Ongeldige actie';
+    case 'line_missing':
+      return 'Deze lijn bestaat niet (meer)';
+    case 'nothing_to_sell':
+      return 'Deze lijn heeft geen voertuigen meer';
+    case 'sold_fewer':
+      return `Er waren maar ${m.count} voertuig(en) om te verkopen`;
     case 'crossing':
       return `Kruist een route van ${playerName(String(m.owner))}`;
     default:
@@ -82,6 +88,13 @@ const ERRORS: Record<string, string> = {
   internal: 'Er ging iets mis op de server',
   report_not_found: 'Rapport niet gevonden',
   unreachable: 'Geen route mogelijk naar dit punt',
+  invalid_player: 'Onbekende speler',
+  already_in_alliance: 'Die speler zit al in een alliantie',
+  already_allied: 'Jullie zijn al bondgenoten',
+  already_invited: 'Je hebt deze speler al uitgenodigd',
+  no_invite: 'Er is geen voorstel (meer)',
+  not_in_alliance: 'Je zit niet in een alliantie',
+  invalid_request: 'Ongeldig verzoek',
   too_long: 'Route te lang voor één actie: zet een tussenpunt dichterbij of bouw in stukken',
   blocked_endpoint: 'Daar kun je niet bouwen',
 };
@@ -109,6 +122,8 @@ export function actionTitle(a: Action, width: number): string {
       return `${STATIONS[a.kind].icon} ${stationName(a.kind)} op (${a.tile % width}, ${Math.floor(a.tile / width)})`;
     case 'vehicles':
       return `${VEHICLES[a.model].icon} ${a.count}× ${vehicleName(a.model)}`;
+    case 'sell':
+      return `💰 ${a.count} voertuig${a.count > 1 ? 'en' : ''} verkopen (lijn ${a.line})`;
   }
 }
 

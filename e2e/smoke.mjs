@@ -266,6 +266,15 @@ try {
   await page.waitForTimeout(300);
   await page.screenshot({ path: path.join(shots, '10-info-station.png') });
 
+  // The rival proposes an alliance; we accept it in the players tab.
+  await api('POST', `/api/games/${gameId}/alliance`, { action: 'invite', player: me.id }, rival.token);
+  await page.getByRole('tab', { name: /Spelers/ }).click();
+  await page.getByRole('button', { name: 'Accepteren' }).click();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: path.join(shots, '10b-alliance.png') });
+  view = await api('GET', `/api/games/${gameId}/view`);
+  check(view.game.alliances.length === 1, 'alliance accepted through the UI');
+
   // --- phone: the rival opens the game on a small touch screen --------------------------
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const mobile = await phone.newPage();
