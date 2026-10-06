@@ -27,7 +27,13 @@ export function attachWebSocket(server: Server, service: GameService): { close()
   };
 
   server.on('upgrade', (req, socket, head) => {
-    const url = new URL(req.url ?? '/', 'http://localhost');
+    let url: URL;
+    try {
+      url = new URL(req.url ?? '/', 'http://localhost');
+    } catch {
+      socket.destroy();
+      return;
+    }
     const gameId = url.searchParams.get('game')?.toUpperCase() ?? '';
     if (url.pathname !== '/ws' || !service.exists(gameId)) {
       socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');

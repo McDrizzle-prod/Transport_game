@@ -88,7 +88,13 @@ function sendJson(req: IncomingMessage, res: ServerResponse, status: number, dat
 function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL, dist: string): boolean {
   if (req.method !== 'GET' && req.method !== 'HEAD') return false;
   if (!existsSync(dist)) return false;
-  let file = path.normalize(path.join(dist, decodeURIComponent(url.pathname)));
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(url.pathname);
+  } catch {
+    return false; // malformed escape sequence: 404
+  }
+  let file = path.normalize(path.join(dist, decoded));
   if (!file.startsWith(path.normalize(dist + path.sep)) && file !== path.normalize(dist)) return false;
   if (!existsSync(file) || statSync(file).isDirectory()) {
     // Single page app: unknown paths get index.html (but missing assets stay 404).
@@ -124,7 +130,7 @@ export function createHttpHandler(service: GameService, clientDist: string | nul
     route('POST', '/api/games/:id/alliance', ({ params, token, body }) => service.alliance(params.id, token, body as never)),
   ];
 
-  return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     // The API uses bearer tokens (no cookies), so allowing other origins is safe and lets native app wrappers connect.
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -166,5 +172,16 @@ export function createHttpHandler(service: GameService, clientDist: string | nul
     if (clientDist && serveStatic(req, res, url, clientDist)) return;
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end(clientDist && existsSync(clientDist) ? 'Not found' : 'Client not built. Run "npm run build" or use "npm run dev".');
+  };
+
+  // Never let a single bad request take the whole server down.
+  return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    try {
+      await handle(req, res);
+    } catch (err) {
+      console.error('[http] request failed', err);
+      if (!res.headersSent) res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Bad request');
+    }
   };
 }

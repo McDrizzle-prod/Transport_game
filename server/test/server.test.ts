@@ -1,4 +1,7 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { Terrain, TileUse } from '@transport/shared';
@@ -29,9 +32,9 @@ describe('API', () => {
     app = null;
   });
 
-  async function start() {
+  async function start(clientDist: string | null = null) {
     clock = Date.UTC(2026, 6, 1, 12, 0);
-    app = await createApp({ dataDir: null, clientDist: null, now: () => clock, tickMs: 50 });
+    app = await createApp({ dataDir: null, clientDist, now: () => clock, tickMs: 50 });
     await new Promise<void>((r) => app!.server.listen(0, '127.0.0.1', () => r()));
     base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
   }
@@ -156,5 +159,18 @@ describe('API', () => {
     expect((await call('POST', `/api/games/${gameId}/resolve`, {}, token)).status).toBe(200);
     expect((await call<ClientView>('GET', `/api/games/${gameId}/view`, undefined, token)).data.game.turn).toBe(2);
     expect((await call('GET', '/api/games/NOPE00')).status).toBe(404);
+  });
+
+  it('survives malformed requests', async () => {
+    const dist = mkdtempSync(path.join(tmpdir(), 'client-dist-'));
+    writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>t</title>');
+    await start(dist);
+    expect((await fetch(`${base}/#/game/X`)).status).toBe(200);
+    expect((await fetch(`${base}/api/games/%E0%A4%A`)).status).toBeGreaterThanOrEqual(400);
+    expect((await fetch(`${base}/%E0%A4%A`)).status).toBe(404);
+    const bad = await fetch(`${base}/api/games`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{nope' });
+    expect(bad.status).toBe(400);
+    // Still alive.
+    expect((await fetch(`${base}/api/health`)).status).toBe(200);
   });
 });
