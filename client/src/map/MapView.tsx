@@ -1,8 +1,9 @@
 // Canvas map: camera, touch/mouse input and the render loop. Lives outside React's render cycle.
 import { useEffect, useRef } from 'react';
-import { STATIONS, VEHICLES, checkStationTile, coverageAt, findRoute, hqError, pointOnRoute } from '@transport/shared';
+import { HQ_BONUS, STATIONS, VEHICLES, checkStationTile, coverageAt, findRoute, hqError, pointOnRoute } from '@transport/shared';
 import type { Action, Edge, GameState, Route, SlotResult, Station, TurnReport, World } from '@transport/shared';
 import { money } from '../format';
+import { groupPath, slotGroups, slotRange } from '../state/groups';
 import { useStore } from '../state/store';
 import type { GameStore, UiState } from '../state/store';
 import { MapRenderer } from './renderer';
@@ -10,7 +11,9 @@ import type { Camera } from './renderer';
 import type { FloatingText, ReplayView, Scene, SlotMarker, ToolOverlay, VehicleSprite } from './scene';
 import { buildTerrainLayer } from './terrain';
 
+/** Replay: time per action slot (shorter when a game has many slots) and per simulation step. */
 const SLOT_MS = 750;
+const BUILD_MS_MAX = 6000;
 const TICK_MS = 170;
 const TAP_SLOP = 8;
 
@@ -72,6 +75,7 @@ class MapController {
     (window as unknown as { __transportrijk?: unknown }).__transportrijk = {
       tileToClient: (tile: number) => this.tileToClient(tile),
       camera: () => ({ ...this.cam }),
+      focus: (tile: number) => this.store.focusTile(tile),
     };
   }
 
@@ -263,8 +267,8 @@ class MapController {
       if (s.replay) this.store.stopReplay();
       else if (s.tool.kind !== 'inspect' && s.tool.kind !== 'hq') this.store.setTool({ kind: 'inspect' });
       else this.store.select(null);
-    } else if (e.key === 'Backspace' && s.tool.kind === 'route' && s.tool.waypoints.length > 0) {
-      this.store.setTool({ ...s.tool, waypoints: s.tool.waypoints.slice(0, -1) });
+    } else if (e.key === 'Backspace' && s.tool.kind === 'route' && s.tool.start !== null) {
+      this.store.setTool({ ...s.tool, start: null });
     } else if (e.key === '+' || e.key === '=') {
       this.flyTo({ ...this.cam, zoom: this.cam.zoom * 1.4 });
     } else if (e.key === '-') {
@@ -332,10 +336,22 @@ class MapController {
       plannedStations = preview.world.state.stations.filter((st) => st.builtTurn === state.turn);
     }
     const markers: SlotMarker[] = [];
-    s.draft.forEach((a, i) => {
-      const tile = a ? this.store.actionTile(a) : null;
-      if (a && tile !== null) markers.push(markerFor(a, i, tile, preview?.results[i] ?? null, map.width, s.highlightSlot === i));
-    });
+    for (const g of slotGroups(s.draft)) {
+      const a = s.draft[g.start];
+      if (!a) continue;
+      const highlighted = s.highlightSlot !== null && s.highlightSlot >= g.start && s.highlightSlot <= g.end;
+      if (g.end > g.start && a.type === 'build') {
+        // A route of several actions gets one marker ("2–9").
+        const path = groupPath(s.draft, g);
+        const outcomes = s.draft.slice(g.start, g.end + 1).map((_, k) => preview?.results[g.start + k]?.outcome ?? 'ok');
+        const status = outcomes.every((o) => o === 'ok') ? 'ok' : outcomes.every((o) => o === 'failed') ? 'failed' : 'partial';
+        const mid = path[Math.floor(path.length / 2)];
+        markers.push({ label: slotRange(g), x: (mid % map.width) + 0.5, y: Math.floor(mid / map.width) + 0.5, status, highlighted, path, kind: a.kind });
+        continue;
+      }
+      const tile = this.store.actionTile(a);
+      if (tile !== null) markers.push(markerFor(a, g.start, tile, preview?.results[g.start] ?? null, map.width, highlighted));
+    }
 
     let vehicles = this.staticVehicles(world);
     let texts: FloatingText[] = [];
@@ -352,6 +368,7 @@ class MapController {
       }
     }
 
+    const mine = state.players.find((p) => p.id === me);
     return {
       map,
       state,
@@ -367,6 +384,10 @@ class MapController {
       texts,
       replay,
       showGrid: s.tool.kind !== 'inspect',
+      hqZone:
+        mine && mine.hq !== null && !replay
+          ? { tile: mine.hq, radius: HQ_BONUS.radius, color: mine.color, label: `HQ-bonus +${Math.round(HQ_BONUS.bonus * 100)}%` }
+          : null,
     };
   }
 
@@ -377,23 +398,18 @@ class MapController {
     if (!me) return null;
     switch (tool.kind) {
       case 'route': {
-        const plan = this.store.routePlan();
-        const hoverPlan = s.hover !== null && tool.waypoints.length > 0 ? this.store.routePlan(s.hover) : null;
-        const shown = plan ?? null;
-        const label = shown?.plan
-          ? `${money(shown.plan.cost)} · ${shown.path!.length - 1} stukken`
-          : hoverPlan?.plan
-            ? `${money(hoverPlan.plan.cost)} · ${hoverPlan.path!.length - 1} stukken`
-            : null;
+        const plan = this.store.routePlan(s.hover);
+        const ok = !!plan?.path && !plan.error && !plan.plan?.fatal;
+        const actions = plan && ok ? this.store.routeActions(plan).length : 0;
+        const free = this.store.freeSlots().length;
         return {
           kind: 'route',
           transport: tool.transport,
-          waypoints: tool.waypoints,
-          path: plan?.path ?? (tool.waypoints.length === 1 ? [tool.waypoints[0]] : null),
-          hoverPath: hoverPlan && !hoverPlan.error ? hoverPlan.path : null,
+          start: tool.start,
+          path: plan?.path ?? null,
           blocked: (plan?.plan?.blocked ?? []).map((b) => b.tile),
-          label: plan?.error ? null : label,
-          ok: !(hoverPlan?.error || plan?.error),
+          label: ok && plan?.plan ? `${actions} acties · ${money(plan.plan.cost)}${actions > free ? ` · ${free} vrij` : ''}` : null,
+          ok: ok && actions <= free,
         };
       }
       case 'station': {
@@ -412,7 +428,12 @@ class MapController {
       case 'vehicles': {
         const world = this.store.planningWorld();
         const kind = VEHICLES[tool.model].kind;
-        const candidates = world ? world.state.stations.filter((st) => st.kind === kind && world.canUse(st.owners, me)).map((st) => st.tile) : [];
+        // Before the first pick every own station is a candidate (the vehicle adapts); after it, only the same kind.
+        const candidates = world
+          ? world.state.stations
+              .filter((st) => world.canUse(st.owners, me) && (tool.from === null || tool.to !== null || st.kind === kind))
+              .map((st) => ({ tile: st.tile, match: st.kind === kind }))
+          : [];
         return { kind: 'vehicles', from: tool.from, to: tool.to, hover: s.hover, candidates };
       }
       case 'hq': {
@@ -486,8 +507,10 @@ class MapController {
     elapsed: number,
     colors: Map<string, string>,
   ): { view: ReplayView; vehicles: VehicleSprite[] | null; texts: FloatingText[] } | null {
-    const buildSlots = report.slots.length > 0 ? 5 : 0;
-    const buildMs = buildSlots * SLOT_MS;
+    // Animate up to the last slot in which something happened.
+    const buildSlots = report.slots.reduce((max, r) => Math.max(max, r.slot), 0);
+    const slotMs = buildSlots > 0 ? Math.min(SLOT_MS, BUILD_MS_MAX / buildSlots) : SLOT_MS;
+    const buildMs = buildSlots * slotMs;
     const ticks = report.replay.ticks;
     const hasVehicles = report.replay.vehicles.length > 0;
     const total = buildMs + (hasVehicles ? (ticks + 6) * TICK_MS : 0);
@@ -512,16 +535,18 @@ class MapController {
     };
 
     if (elapsed < buildMs) {
-      const slot = Math.floor(elapsed / SLOT_MS) + 1;
+      const slot = Math.floor(elapsed / slotMs) + 1;
       const results = report.slots.filter((r) => r.slot === slot);
+      // Conflicts stay marked once they happened, so they can be seen at the end of the build phase.
+      const sofar = report.slots.filter((r) => r.slot <= slot);
       return {
         view: {
           turn: report.turn,
           slot,
           activeSlot: slot,
-          lostTiles: results.flatMap((r) => r.lost.map((l) => l.tile)),
-          sharedTiles: results.flatMap((r) => r.shared.map((sh) => sh.tile)),
-          label: `Beurt ${report.turn} · actieslot ${slot} van 5${results.length ? '' : ' (geen acties)'}`,
+          lostTiles: sofar.flatMap((r) => r.lost.map((l) => l.tile)),
+          sharedTiles: sofar.flatMap((r) => r.shared.map((sh) => sh.tile)),
+          label: `Beurt ${report.turn} · actieslot ${slot} van ${buildSlots}${results.length ? '' : ' (geen acties)'}`,
         },
         vehicles: hasVehicles ? report.replay.vehicles.map((rv) => sprite(rv, 0)) : null,
         texts: [],
@@ -542,17 +567,18 @@ class MapController {
 function markerFor(a: Action, i: number, tile: number, result: SlotResult | null, width: number, highlighted: boolean): SlotMarker {
   const c = (t: number): [number, number] => [(t % width) + 0.5, Math.floor(t / width) + 0.5];
   const status = result?.outcome ?? 'ok';
+  const label = String(i + 1);
   if (a.type === 'build') {
     const [x, y] = c(tile);
-    return { slot: i + 1, x, y, status, highlighted, path: a.path, kind: a.kind };
+    return { label, x, y, status, highlighted, path: a.path, kind: a.kind };
   }
   if (a.type === 'station' || a.type === 'sell') {
     const [x, y] = c(tile);
-    return { slot: i + 1, x: x + 0.45, y: y - 0.45, status, highlighted };
+    return { label, x: x + 0.45, y: y - 0.45, status, highlighted };
   }
   const [fx, fy] = c(a.from);
   const [tx, ty] = c(a.to);
-  return { slot: i + 1, x: (fx + tx) / 2, y: (fy + ty) / 2, status, highlighted, line: [fx, fy, tx, ty] };
+  return { label, x: (fx + tx) / 2, y: (fy + ty) / 2, status, highlighted, line: [fx, fy, tx, ty] };
 }
 
 function lighten(hex: string): string {

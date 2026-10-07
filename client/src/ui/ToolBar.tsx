@@ -1,5 +1,12 @@
+import type { TransportKind } from '@transport/shared';
 import { useStore, useUi } from '../state/store';
 import type { ToolState } from '../state/store';
+
+/** Stations at the ends of a route cost an action each, so they are off unless the player switched them on. */
+const stationChoice = (current: ToolState, transport: TransportKind) =>
+  current.kind === 'route' && current.transport === transport
+    ? { stationStart: current.stationStart, stationEnd: current.stationEnd }
+    : { stationStart: false, stationEnd: false };
 
 interface ToolButton {
   id: string;
@@ -15,21 +22,21 @@ const TOOLS: ToolButton[] = [
     id: 'road',
     icon: '🛣️',
     label: 'Weg',
-    make: () => ({ kind: 'route', transport: 'road', waypoints: [], stationStart: true, stationEnd: true, editSlot: null }),
+    make: (c) => ({ kind: 'route', transport: 'road', start: null, ...stationChoice(c, 'road') }),
     active: (t) => t.kind === 'route' && t.transport === 'road',
   },
   {
     id: 'rail',
     icon: '🛤️',
     label: 'Spoor',
-    make: () => ({ kind: 'route', transport: 'rail', waypoints: [], stationStart: true, stationEnd: true, editSlot: null }),
+    make: (c) => ({ kind: 'route', transport: 'rail', start: null, ...stationChoice(c, 'rail') }),
     active: (t) => t.kind === 'route' && t.transport === 'rail',
   },
   {
     id: 'canal',
     icon: '🌊',
     label: 'Kanaal',
-    make: () => ({ kind: 'route', transport: 'canal', waypoints: [], stationStart: false, stationEnd: false, editSlot: null }),
+    make: () => ({ kind: 'route', transport: 'canal', start: null, stationStart: false, stationEnd: false }),
     active: (t) => t.kind === 'route' && t.transport === 'canal',
   },
   {
@@ -43,7 +50,7 @@ const TOOLS: ToolButton[] = [
     id: 'vehicles',
     icon: '🚂',
     label: 'Voertuigen',
-    make: () => ({ kind: 'vehicles', from: null, to: null, model: 'truck', count: 1, editSlot: null }),
+    make: (c) => ({ kind: 'vehicles', from: null, to: null, model: c.kind === 'vehicles' ? c.model : 'truck', count: 1, editSlot: null }),
     active: (t) => t.kind === 'vehicles',
   },
 ];

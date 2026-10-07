@@ -46,6 +46,16 @@ export interface SetOrdersRequest {
   ready: boolean;
 }
 
+export interface LoanRequest {
+  action: 'take' | 'repay';
+  amount: number;
+}
+
+export interface BidRequest {
+  auction: number;
+  amount: number;
+}
+
 export type ServerMessage = { type: 'view'; view: ClientView } | { type: 'error'; error: string };
 
 export interface ApiErrorBody {

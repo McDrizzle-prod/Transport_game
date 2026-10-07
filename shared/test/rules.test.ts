@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { STATIONS, TRANSPORT, VEHICLES, World, edgeKey, planRoute, previewOrders, resolveTurn, sanitizeOrders } from '../src';
-import { addIndustry, hPath, makeWorld, slots, vPath } from './helpers';
+import type { OrderSlots } from '../src';
+import { addIndustry, hPath, makeWorld, segments, slots, vPath } from './helpers';
 
 describe('building routes', () => {
   it('builds a road with stations at both ends and charges the player', () => {
@@ -226,15 +227,62 @@ describe('planning and previews', () => {
 describe('order validation', () => {
   it('accepts valid orders and rejects malformed ones', () => {
     const w = makeWorld({ width: 20, height: 20 });
-    const good = sanitizeOrders(w.map, [{ type: 'build', kind: 'road', path: [w.at(1, 1), w.at(2, 2), w.at(3, 2)] }, null]);
+    const good = sanitizeOrders(w.map, [{ type: 'build', kind: 'road', path: [w.at(1, 1), w.at(2, 2)], stationEnd: true }, null], 5);
     expect(good.ok).toBe(true);
-    if (good.ok) expect(good.slots).toHaveLength(5);
+    if (good.ok) {
+      expect(good.slots).toHaveLength(5);
+      // A station is a separate action: the flag is dropped.
+      expect(good.slots[0]).toEqual({ type: 'build', kind: 'road', path: [w.at(1, 1), w.at(2, 2)] });
+    }
 
-    expect(sanitizeOrders(w.map, [{ type: 'build', kind: 'road', path: [w.at(1, 1), w.at(5, 5)] }]).ok).toBe(false);
-    expect(sanitizeOrders(w.map, [{ type: 'build', kind: 'teleport', path: [1, 2] }]).ok).toBe(false);
-    expect(sanitizeOrders(w.map, [{ type: 'vehicles', model: 'truck', from: 1, to: 2, count: 99 }]).ok).toBe(false);
-    expect(sanitizeOrders(w.map, [null, null, null, null, null, null]).ok).toBe(false);
-    expect(sanitizeOrders(w.map, 'nonsense').ok).toBe(false);
+    expect(sanitizeOrders(w.map, [{ type: 'build', kind: 'road', path: [w.at(1, 1), w.at(5, 5)] }], 5).ok).toBe(false);
+    expect(sanitizeOrders(w.map, [{ type: 'build', kind: 'teleport', path: [1, 2] }], 5).ok).toBe(false);
+    expect(sanitizeOrders(w.map, [{ type: 'vehicles', model: 'truck', from: 1, to: 2, count: 99 }], 5).ok).toBe(false);
+    expect(sanitizeOrders(w.map, [null, null, null, null, null, null], 5).ok).toBe(false);
+    expect(sanitizeOrders(w.map, [null, null, null, null, null, null], 8).ok).toBe(true);
+    expect(sanitizeOrders(w.map, 'nonsense', 5).ok).toBe(false);
+  });
+
+  it('costs one action per segment: a longer route in one action is refused', () => {
+    const w = makeWorld({ width: 20, height: 20 });
+    const long = { type: 'build', kind: 'rail', path: [w.at(1, 1), w.at(2, 1), w.at(3, 1)] };
+    expect(sanitizeOrders(w.map, [long], 5).ok).toBe(false);
+  });
+});
+
+describe('action slots', () => {
+  it('executes as many slots as the game is set up with', () => {
+    const w = makeWorld({ width: 30, height: 12, actionSlots: 8 });
+    const path = hPath(w, 3, 10, 5);
+    const { state, report } = resolveTurn(w.map, w.state, { A: segments('road', path) as OrderSlots }, 0);
+    expect(report.slots).toHaveLength(7);
+    expect(report.slots.map((r) => r.slot)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(report.slots.every((r) => r.outcome === 'ok')).toBe(true);
+    expect(Object.keys(state.infra.edges)).toHaveLength(7);
+  });
+
+  it('builds a route segment by segment; a segment over a lost tile fails, the others are built', () => {
+    const w = makeWorld({ width: 30, height: 20 });
+    const a = hPath(w, 8, 12, 8); // A: horizontal, slots 1-4
+    const b = vPath(w, 10, 6, 10); // B: vertical, crosses (10, 8) in its slots 2 and 3
+    const { state, report } = resolveTurn(
+      w.map,
+      w.state,
+      { A: segments('road', a) as OrderSlots, B: segments('road', b) as OrderSlots },
+      0,
+    );
+    const crossing = w.at(10, 8);
+    // A reaches (10, 8) with its 2nd segment, B also in its 2nd segment: the same slot, so the tile is shared.
+    expect(state.infra.tiles[crossing].owners).toEqual(['A', 'B']);
+    expect(report.slots.filter((r) => r.player === 'A').every((r) => r.outcome === 'ok')).toBe(true);
+
+    // C comes later: (10, 8) and its neighbours are taken.
+    const w2 = makeWorld({ width: 30, height: 20, players: ['A', 'C'] });
+    const first = resolveTurn(w2.map, w2.state, { A: segments('rail', hPath(w2, 8, 12, 8)) as OrderSlots }, 0);
+    const second = resolveTurn(w2.map, first.state, { C: segments('rail', vPath(w2, 10, 6, 10)) as OrderSlots }, 0);
+    const outcomes = second.report.slots.map((r) => r.outcome);
+    expect(outcomes).toEqual(['ok', 'failed', 'failed', 'ok']);
+    expect(second.report.slots[1].lost[0]).toMatchObject({ tile: w2.at(10, 8), owners: ['A'], turn: 1, slot: 2 });
   });
 });
 

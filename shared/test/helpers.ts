@@ -1,6 +1,6 @@
 // Builds small hand-made worlds so rules can be tested precisely.
 import { INDUSTRIES, Terrain, TileUse, initialMarket, normalizeSettings } from '../src';
-import type { Action, CargoAmounts, City, GameState, Industry, IndustryTypeId, MapData, OrderSlots } from '../src';
+import type { Action, CargoAmounts, City, GameState, Industry, IndustryTypeId, MapData, OrderSlots, TransportKind } from '../src';
 
 export interface TestWorld {
   map: MapData;
@@ -14,6 +14,7 @@ export function makeWorld(opts: {
   players?: string[];
   water?: (x: number, y: number) => boolean;
   money?: number;
+  actionSlots?: number;
 }): TestWorld {
   const { width, height } = opts;
   const n = width * height;
@@ -30,7 +31,7 @@ export function makeWorld(opts: {
     use: new Array(n).fill(TileUse.None),
     cities: [],
   };
-  const settings = normalizeSettings({ mapSize: 64, seed: 7, startMoney: opts.money ?? 1_000_000 }, 7);
+  const settings = normalizeSettings({ mapSize: 64, seed: 7, startMoney: opts.money ?? 1_000_000, actionSlots: opts.actionSlots }, 7);
   const state: GameState = {
     id: 'TEST',
     name: 'Test',
@@ -43,6 +44,7 @@ export function makeWorld(opts: {
     players: [],
     industries: [],
     cityStats: {},
+    cityStock: {},
     infra: { tiles: {}, edges: {} },
     stations: [],
     lines: [],
@@ -50,6 +52,7 @@ export function makeWorld(opts: {
     market: initialMarket(map, []),
     alliances: [],
     invites: [],
+    auctions: [],
     nextId: 1,
   };
   (opts.players ?? ['A', 'B']).forEach((id, k) => {
@@ -62,6 +65,7 @@ export function makeWorld(opts: {
       isHost: k === 0,
       joinedAt: 0,
       last: null,
+      debt: 0,
     });
   });
   return { map, state, at: (x, y) => y * width + x };
@@ -83,6 +87,7 @@ export function addIndustry(w: TestWorld, type: IndustryTypeId, x: number, y: nu
     stock,
     input,
     stats: { produced: 0, shipped: 0, received: {} },
+    shares: {},
   };
   for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) w.map.use[w.at(x + dx, y + dy)] = TileUse.Industry;
   w.state.industries.push(ind);
@@ -90,7 +95,8 @@ export function addIndustry(w: TestWorld, type: IndustryTypeId, x: number, y: nu
   return ind;
 }
 
-export function addCity(w: TestWorld, x: number, y: number, demand: CargoAmounts): City {
+/** A 3×3 city (streets in a cross) around (x, y) with 1000 inhabitants: 25 passengers per turn. */
+export function addCity(w: TestWorld, x: number, y: number, demand: CargoAmounts = {}): City {
   const tiles: number[] = [];
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
@@ -122,7 +128,14 @@ export function vPath(w: TestWorld, x: number, y0: number, y1: number): number[]
 }
 
 export function slots(...actions: (Action | null)[]): OrderSlots {
-  const s: OrderSlots = [null, null, null, null, null];
+  const s: OrderSlots = Array.from({ length: Math.max(5, actions.length) }, () => null);
   actions.forEach((a, i) => (s[i] = a));
   return s;
+}
+
+/** Build actions for a path, one segment per action (as players have to order them). */
+export function segments(kind: TransportKind, path: number[]): Action[] {
+  const actions: Action[] = [];
+  for (let i = 0; i + 1 < path.length; i++) actions.push({ type: 'build', kind, path: [path[i], path[i + 1]] });
+  return actions;
 }

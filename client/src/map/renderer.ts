@@ -1,5 +1,6 @@
 // Draws one frame of the map: terrain layer + infrastructure, stations, vehicles, plans and overlays.
-import { CARGO, INDUSTRIES, MIN_HQ_DISTANCE, STATIONS, Terrain } from '@transport/shared';
+import { CARGO, HQ_BONUS, INDUSTRIES, MIN_HQ_DISTANCE, STATIONS, Terrain, cityPassengers } from '@transport/shared';
+import type { CargoId } from '@transport/shared';
 import type { Edge, Station } from '@transport/shared';
 import { INFRA, hexToRgba } from './palette';
 import type { Scene, SlotMarker, ToolOverlay, VehicleSprite } from './scene';
@@ -79,6 +80,7 @@ export class MapRenderer {
     ctx.strokeRect(0, 0, map.width, map.height);
 
     if (scene.showGrid && cam.zoom >= 14) this.drawGrid(scene, view, cam.zoom);
+    if (scene.hqZone) this.drawHqZone(scene.map.width, scene.hqZone, cam.zoom);
 
     const hide = scene.replay;
     const edges = Object.values(scene.state.infra.edges).filter(
@@ -100,6 +102,11 @@ export class MapRenderer {
     this.drawCities(scene, cam);
     this.drawStations(scene, cam, view);
     this.drawHqs(scene, cam);
+    if (scene.hqZone && cam.zoom >= 6) {
+      const z = scene.hqZone;
+      const [lx, ly] = this.toScreen(cam, (z.tile % map.width) - z.radius, Math.floor(z.tile / map.width) - z.radius);
+      this.label(z.label, lx + 6, ly + 10, `700 11px ${UI_FONT}`, '#fff', 'left');
+    }
     if (hide) this.drawReplayMarks(scene, cam, hide);
     for (const m of scene.markers) this.drawMarker(scene, cam, m);
     if (scene.tool) this.drawToolScreen(scene, cam, scene.tool);
@@ -213,6 +220,21 @@ export class MapRenderer {
       ctx.lineTo(xe, y);
     }
     ctx.stroke();
+  }
+
+  /** Dashed square around the own headquarters: the area where deliveries earn a bonus. */
+  private drawHqZone(width: number, zone: NonNullable<Scene['hqZone']>, zoom: number): void {
+    const ctx = this.ctx;
+    const x = (zone.tile % width) - zone.radius;
+    const y = Math.floor(zone.tile / width) - zone.radius;
+    const size = 2 * zone.radius + 1;
+    ctx.fillStyle = hexToRgba(zone.color, 0.06);
+    ctx.fillRect(x, y, size, size);
+    ctx.strokeStyle = hexToRgba(zone.color, 0.85);
+    ctx.lineWidth = 2 / zoom;
+    ctx.setLineDash([6 / zoom, 4 / zoom]);
+    ctx.strokeRect(x, y, size, size);
+    ctx.setLineDash([]);
   }
 
   private drawEdges(scene: Scene, edges: Edge[], zoom: number): void {
@@ -375,13 +397,19 @@ export class MapRenderer {
     switch (tool.kind) {
       case 'route': {
         const color = KIND_COLOR[tool.transport];
-        if (tool.hoverPath) {
-          pathLine(tool.hoverPath, 'rgba(255, 255, 255, 0.7)', Math.max(0.36, 4 / zoom));
-          pathLine(tool.hoverPath, hexToRgba(color, 0.6), Math.max(0.22, 2.4 / zoom), [0.3, 0.2]);
-        }
         if (tool.path) {
-          pathLine(tool.path, 'rgba(255, 255, 255, 0.95)', Math.max(0.42, 4.5 / zoom));
-          pathLine(tool.path, color, Math.max(0.28, 3 / zoom));
+          pathLine(tool.path, 'rgba(255, 255, 255, 0.9)', Math.max(0.42, 4.5 / zoom));
+          pathLine(tool.path, hexToRgba(color, tool.ok ? 1 : 0.7), Math.max(0.28, 3 / zoom), tool.ok ? [] : [0.3, 0.2]);
+          // One action per segment: mark the tiles.
+          if (zoom >= 10) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            for (const t of tool.path) {
+              const [x, y] = this.center(scene, t);
+              ctx.beginPath();
+              ctx.arc(x, y, Math.max(0.07, 2 / zoom), 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
         }
         for (const t of tool.blocked) tileRect(t, 'rgba(220, 40, 40, 0.45)', '#ff5252');
         break;
@@ -431,7 +459,20 @@ export class MapRenderer {
           ctx.strokeRect(x - r, y - r, 2 * r + 1, 2 * r + 1);
           ctx.setLineDash([]);
         }
-        if (tool.hover !== null) tileRect(tool.hover, tool.ok ? 'rgba(80, 220, 120, 0.6)' : 'rgba(230, 60, 60, 0.6)', '#fff');
+        if (tool.hover !== null) {
+          // Preview of the bonus area around the headquarters.
+          const r = HQ_BONUS.radius;
+          const x = tool.hover % scene.map.width;
+          const y = (tool.hover / scene.map.width) | 0;
+          ctx.fillStyle = tool.ok ? 'rgba(255, 213, 74, 0.08)' : 'rgba(0, 0, 0, 0)';
+          ctx.fillRect(x - r, y - r, 2 * r + 1, 2 * r + 1);
+          ctx.strokeStyle = 'rgba(255, 213, 74, 0.8)';
+          ctx.lineWidth = 2 / zoom;
+          ctx.setLineDash([0.4, 0.3]);
+          ctx.strokeRect(x - r, y - r, 2 * r + 1, 2 * r + 1);
+          ctx.setLineDash([]);
+          tileRect(tool.hover, tool.ok ? 'rgba(80, 220, 120, 0.6)' : 'rgba(230, 60, 60, 0.6)', '#fff');
+        }
         break;
       }
     }
@@ -498,8 +539,13 @@ export class MapRenderer {
       const [sx, sy] = this.toScreen(cam, c.x + 0.5, c.y + 0.5);
       if (sx < -100 || sy < -50 || sx > this.width + 100 || sy > this.height + 50) continue;
       const size = Math.round(Math.max(13, Math.min(18, 10 + cam.zoom * 0.3)));
-      this.label(c.name, sx, sy - c.radius * cam.zoom * 0.2 - 4, `700 ${size}px ${UI_FONT}`);
-      if (cam.zoom >= 8) this.label(`👥 ${c.population.toLocaleString('nl-NL')}`, sx, sy - c.radius * cam.zoom * 0.2 + 12, `11px ${UI_FONT}`, '#dfe8ef');
+      const top = sy - c.radius * cam.zoom * 0.2 - 4;
+      this.label(c.name, sx, top, `700 ${size}px ${UI_FONT}`);
+      if (cam.zoom >= 8) {
+        // What the city wants: goods (icons) and passengers to other cities.
+        const wants = (Object.keys(c.demand) as CargoId[]).map((cargo) => CARGO[cargo].icon).join('');
+        this.label(`${wants} · 👥 ${cityPassengers(c)}/beurt`, sx, top + 16, `12px ${UI_FONT}`, '#ffe9a8');
+      }
     }
   }
 
@@ -623,41 +669,42 @@ export class MapRenderer {
     }
     const [sx, sy] = m.line ? [m.x, m.y] : this.toScreen(cam, m.x, m.y);
     const r = m.highlighted ? 13 : 11;
-    ctx.beginPath();
-    ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    ctx.font = `800 ${m.highlighted ? 14 : 12}px ${UI_FONT}`;
+    // A circle for one slot, a pill for a range of slots.
+    const w = Math.max(2 * r, ctx.measureText(m.label).width + 12);
+    this.roundRect(sx - w / 2, sy - r, w, 2 * r, r);
     ctx.fillStyle = m.status === 'ok' ? myColor : m.status === 'partial' ? '#ff9800' : '#e53935';
     ctx.fill();
     ctx.lineWidth = 2.5;
     ctx.strokeStyle = '#fff';
     ctx.stroke();
     ctx.fillStyle = '#fff';
-    ctx.font = `800 ${m.highlighted ? 14 : 12}px ${UI_FONT}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(String(m.slot), sx, sy + 0.5);
+    ctx.fillText(m.label, sx, sy + 0.5);
   }
 
   private drawToolScreen(scene: Scene, cam: Camera, tool: ToolOverlay): void {
     const ctx = this.ctx;
     const pos = (t: number) => this.toScreen(cam, (t % scene.map.width) + 0.5, ((t / scene.map.width) | 0) + 0.5);
     if (tool.kind === 'route') {
-      tool.waypoints.forEach((t, i) => {
-        const [x, y] = pos(t);
+      if (tool.start !== null) {
+        const [x, y] = pos(tool.start);
         ctx.beginPath();
         ctx.arc(x, y, 8, 0, Math.PI * 2);
-        ctx.fillStyle = i === 0 ? '#ffffff' : '#ffd54a';
+        ctx.fillStyle = '#ffffff';
         ctx.fill();
         ctx.lineWidth = 2.5;
         ctx.strokeStyle = '#222';
         ctx.stroke();
-      });
+      }
       const end = tool.path?.[tool.path.length - 1];
       if (tool.label && end !== undefined) {
         const [x, y] = pos(end);
         ctx.font = `700 12px ${UI_FONT}`;
         const w = ctx.measureText(tool.label).width + 14;
         this.roundRect(x + 12, y - 26, w, 22, 6);
-        ctx.fillStyle = tool.ok ? 'rgba(20, 30, 38, 0.92)' : 'rgba(150, 30, 30, 0.92)';
+        ctx.fillStyle = tool.ok ? 'rgba(20, 30, 38, 0.92)' : 'rgba(150, 90, 20, 0.92)';
         ctx.fill();
         ctx.fillStyle = '#fff';
         ctx.textAlign = 'left';
@@ -665,13 +712,14 @@ export class MapRenderer {
         ctx.fillText(tool.label, x + 19, y - 15);
       }
     } else if (tool.kind === 'vehicles') {
-      for (const t of tool.candidates) {
+      for (const { tile: t, match } of tool.candidates) {
         const [x, y] = pos(t);
+        const chosen = t === tool.from || t === tool.to;
         ctx.beginPath();
         ctx.arc(x, y, Math.max(14, cam.zoom * 0.75), 0, Math.PI * 2);
-        ctx.strokeStyle = t === tool.from || t === tool.to ? '#ffd54a' : 'rgba(255, 255, 255, 0.85)';
-        ctx.lineWidth = t === tool.from || t === tool.to ? 4 : 2;
-        ctx.setLineDash(t === tool.from || t === tool.to ? [] : [5, 4]);
+        ctx.strokeStyle = chosen ? '#ffd54a' : match ? 'rgba(255, 255, 255, 0.9)' : 'rgba(255, 255, 255, 0.45)';
+        ctx.lineWidth = chosen ? 4 : 2;
+        ctx.setLineDash(chosen ? [] : [5, 4]);
         ctx.stroke();
         ctx.setLineDash([]);
       }

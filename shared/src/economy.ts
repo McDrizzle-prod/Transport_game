@@ -1,21 +1,63 @@
 // Station catchment areas, cargo acceptance, revenue and estimates for the UI.
-import { CARGO, INDUSTRIES, LOAD_TICKS, STATIONS, TICKS_PER_TURN, VEHICLES } from './config';
-import { distToRect, euclid, tileX, tileY } from './geometry';
+import { majorityHolder, tollsFor } from './auctions';
+import { CARGO, HQ_BONUS, INDUSTRIES, LOAD_TICKS, PASSENGERS_PER_INHABITANT, STATIONS, TICKS_PER_TURN, VEHICLES } from './config';
+import { chebyshev, distToRect, euclid, tileX, tileY } from './geometry';
+import type { Grid } from './geometry';
 import { findRoute } from './pathfind';
-import type { CargoId, City, Industry, PlayerId, Station, StationKind, VehicleModelId } from './types';
+import type { CargoId, City, GameState, Industry, PlayerId, Station, StationKind, VehicleModelId } from './types';
 import type { World } from './world';
 
 export interface Coverage {
   industries: Industry[];
+  /** Covered cities: they want goods, and send and receive passengers. */
   cities: City[];
-  /** Cargo produced by covered industries. */
+  /** Freight produced by covered industries. */
   supplies: Set<CargoId>;
-  /** Cargo wanted by covered industries or cities. */
+  /** Freight wanted by covered industries or cities (passengers are handled separately). */
   accepts: Set<CargoId>;
 }
 
+export type Carries = 'cargo' | 'passengers';
+
 export function industryCenter(ind: Industry): [number, number] {
   return [ind.x + ind.w / 2, ind.y + ind.h / 2];
+}
+
+export function cityCenter(city: City): [number, number] {
+  return [city.x + 0.5, city.y + 0.5];
+}
+
+/** Passengers per turn that want to travel from a city to another city. */
+export function cityPassengers(city: City): number {
+  return Math.round(city.population * PASSENGERS_PER_INHABITANT);
+}
+
+/** Price multiplier of a cargo (passengers have a fixed price). */
+export function cargoPrice(state: GameState, cargo: CargoId): number {
+  return CARGO[cargo].market === false ? 1 : (state.market.prices[cargo] ?? 1);
+}
+
+/** Is `tile` within the bonus area around a headquarters? */
+export function inHqZone(grid: Grid, hq: number, tile: number): boolean {
+  return chebyshev(tileX(grid, hq), tileY(grid, hq), tileX(grid, tile), tileY(grid, tile)) <= HQ_BONUS.radius;
+}
+
+/** Deliveries between stations on these tiles earn the headquarters bonus when all of them lie near the player's HQ. */
+export function hqBonusApplies(world: World, player: PlayerId, tiles: number[]): boolean {
+  const hq = world.state.players.find((p) => p.id === player)?.hq;
+  if (hq === null || hq === undefined) return false;
+  return tiles.every((t) => inHqZone(world.grid, hq, t));
+}
+
+/** May `player` pick up cargo at the industry? Not when somebody else (and no ally) owns the majority of its shares. */
+export function pickupAllowed(world: World, ind: Industry, player: PlayerId): boolean {
+  const holder = majorityHolder(ind);
+  return !holder || world.canUse([holder], player);
+}
+
+/** Fraction of revenue from this industry's cargo that `player` pays to the other shareholders. */
+export function tollRate(ind: Industry, player: PlayerId): number {
+  return tollsFor(ind, player).reduce((s, t) => s + t.part, 0);
 }
 
 export function coversIndustry(kind: StationKind, tile: number, width: number, ind: Industry): boolean {
@@ -54,6 +96,24 @@ export interface Consumer {
   y: number;
 }
 
+/** The city (other than the one passengers come from) in a station's catchment that is closest to the station. */
+export function findPassengerDestination(world: World, cov: Coverage, tile: number, originCity: number): Consumer | null {
+  const sx = tileX(world.grid, tile) + 0.5;
+  const sy = tileY(world.grid, tile) + 0.5;
+  let best: Consumer | null = null;
+  let bestD = Infinity;
+  for (const c of cov.cities) {
+    if (c.id === originCity) continue;
+    const [x, y] = cityCenter(c);
+    const d = euclid(sx, sy, x, y);
+    if (d < bestD) {
+      bestD = d;
+      best = { kind: 'city', id: c.id, name: c.name, x, y };
+    }
+  }
+  return best;
+}
+
 /** The consumer of `cargo` within a station's catchment that is closest to the station. */
 export function findConsumer(world: World, cov: Coverage, tile: number, cargo: CargoId): Consumer | null {
   const sx = tileX(world.grid, tile) + 0.5;
@@ -88,14 +148,15 @@ export function revenueFor(cargo: CargoId, amount: number, distance: number, pri
   return amount * CARGO[cargo].price * priceIndex * Math.max(1, distance);
 }
 
-export function hasActiveLine(world: World, station: Station): boolean {
+export function hasActiveLine(world: World, station: Station, carries: Carries = 'cargo'): boolean {
   return world.state.lines.some(
-    (l) => l.stations.includes(station.id) && world.state.vehicles.some((v) => v.lineId === l.id),
+    (l) => (l.carries ?? 'cargo') === carries && l.stations.includes(station.id) && world.state.vehicles.some((v) => v.lineId === l.id),
   );
 }
 
 /** Expected units per turn a station would get from an industry (production is split between stations). */
-export function supplyPerTurn(world: World, ind: Industry, station: Station): number {
+export function supplyPerTurn(world: World, ind: Industry, station: Station, player?: PlayerId): number {
+  if (player && !pickupAllowed(world, ind, player)) return 0;
   const def = INDUSTRIES[ind.type];
   const base = def.inputs ? ind.stats.produced : ind.rate;
   const competing = world.state.stations.filter(
@@ -104,29 +165,69 @@ export function supplyPerTurn(world: World, ind: Industry, station: Station): nu
   return base / (competing + 1);
 }
 
+/** Expected passengers per turn a station gets from a city (split between stations with passenger lines). */
+export function passengerSupplyPerTurn(world: World, city: City, station: Station): number {
+  const competing = world.state.stations.filter(
+    (s) => s.id !== station.id && coverageAt(world, s.kind, s.tile).cities.includes(city) && hasActiveLine(world, s, 'passengers'),
+  ).length;
+  return cityPassengers(city) / (competing + 1);
+}
+
 export interface FlowEstimate {
   cargo: CargoId;
   /** 0 = from the first to the second station, 1 = back. */
   direction: 0 | 1;
+  /** Industry, or city for passengers. */
   origin: { id: number; name: string };
   consumer: Consumer;
   distance: number;
+  /** What the player keeps per unit: price × distance, plus headquarters bonus, minus tolls. */
   unitRevenue: number;
+  /** Fraction of the revenue paid to other shareholders of the industry. */
+  toll: number;
+  /** Majority shareholder that keeps the player away from this industry. */
+  excludedBy: PlayerId | null;
   supplyPerTurn: number;
   amountPerTurn: number;
   revenuePerTurn: number;
 }
 
-/** Possible cargo flows between two stations (both directions), ignoring vehicle capacity. */
-export function lineFlows(world: World, a: Station, b: Station): FlowEstimate[] {
+/**
+ * Possible flows between two stations (both directions), ignoring vehicle capacity: freight from
+ * industries, or passengers between cities. `player` (the line owner) decides bonus, tolls and access.
+ */
+export function lineFlows(world: World, a: Station, b: Station, carries: Carries = 'cargo', player?: PlayerId): FlowEstimate[] {
   const flows: FlowEstimate[] = [];
   const covA = stationCoverage(world, a);
   const covB = stationCoverage(world, b);
+  const bonus = player && hqBonusApplies(world, player, [a.tile, b.tile]) ? 1 + HQ_BONUS.bonus : 1;
   const pairs: [Station, Coverage, Station, Coverage, 0 | 1][] = [
     [a, covA, b, covB, 0],
     [b, covB, a, covA, 1],
   ];
   for (const [src, srcCov, dst, dstCov, direction] of pairs) {
+    if (carries === 'passengers') {
+      for (const city of srcCov.cities) {
+        const consumer = findPassengerDestination(world, dstCov, dst.tile, city.id);
+        if (!consumer) continue;
+        const [ox, oy] = cityCenter(city);
+        const distance = euclid(ox, oy, consumer.x, consumer.y);
+        flows.push({
+          cargo: 'passengers',
+          direction,
+          origin: { id: city.id, name: city.name },
+          consumer,
+          distance,
+          unitRevenue: revenueFor('passengers', 1, distance, 1) * bonus,
+          toll: 0,
+          excludedBy: null,
+          supplyPerTurn: passengerSupplyPerTurn(world, city, src),
+          amountPerTurn: 0,
+          revenuePerTurn: 0,
+        });
+      }
+      continue;
+    }
     for (const ind of srcCov.industries) {
       const cargo = INDUSTRIES[ind.type].output;
       if (!dstCov.accepts.has(cargo)) continue;
@@ -134,14 +235,18 @@ export function lineFlows(world: World, a: Station, b: Station): FlowEstimate[] 
       if (!consumer) continue;
       const [ox, oy] = industryCenter(ind);
       const distance = euclid(ox, oy, consumer.x, consumer.y);
+      const toll = player ? tollRate(ind, player) : 0;
+      const excludedBy = player && !pickupAllowed(world, ind, player) ? majorityHolder(ind) : null;
       flows.push({
         cargo,
         direction,
         origin: { id: ind.id, name: ind.name },
         consumer,
         distance,
-        unitRevenue: revenueFor(cargo, 1, distance, world.state.market.prices[cargo] ?? 1),
-        supplyPerTurn: supplyPerTurn(world, ind, src),
+        unitRevenue: revenueFor(cargo, 1, distance, cargoPrice(world.state, cargo)) * bonus * (1 - toll),
+        toll,
+        excludedBy,
+        supplyPerTurn: supplyPerTurn(world, ind, src, player),
         amountPerTurn: 0,
         revenuePerTurn: 0,
       });
@@ -152,6 +257,8 @@ export function lineFlows(world: World, a: Station, b: Station): FlowEstimate[] 
 
 export interface LineEstimate {
   connected: boolean;
+  /** Both stations lie near the player's headquarters: deliveries earn the bonus. */
+  hqBonus: boolean;
   /** Route length in tiles (estimated as 1.25 × straight line when not connected). */
   length: number;
   /** Ticks for a single trip including loading. */
@@ -189,7 +296,7 @@ export function estimateLine(
   const roundTripTicks = 2 * tripTicks;
   const tripsPerTurn = TICKS_PER_TURN / roundTripTicks;
   const capacityPerTurn = tripsPerTurn * m.capacity * count;
-  const flows = lineFlows(world, a, b);
+  const flows = lineFlows(world, a, b, m.carries, player);
   for (const direction of [0, 1] as const) {
     const dirFlows = flows.filter((f) => f.direction === direction);
     const supply = dirFlows.reduce((s, f) => s + f.supplyPerTurn, 0);
@@ -206,6 +313,7 @@ export function estimateLine(
   const investment = m.price * count;
   return {
     connected: !!route,
+    hqBonus: hqBonusApplies(world, player, [a.tile, b.tile]),
     length,
     tripTicks,
     firstDeliveryTurns: tripTicks / TICKS_PER_TURN,

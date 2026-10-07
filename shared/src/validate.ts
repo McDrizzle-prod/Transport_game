@@ -1,6 +1,6 @@
 // Sanitising orders received from clients. Only the shape is checked here; the game rules are
 // applied when the turn is resolved (the world may change before then).
-import { ACTION_SLOTS, MAX_ROUTE_EDGES, MAX_VEHICLES_PER_ACTION, VEHICLES } from './config';
+import { MAX_VEHICLES_PER_ACTION, VEHICLES } from './config';
 import { isAdjacent, validTile } from './geometry';
 import type { Grid } from './geometry';
 import type { Action, MapData, OrderSlots, StationKind, TransportKind, VehicleModelId } from './types';
@@ -17,23 +17,13 @@ export function sanitizeAction(grid: Grid, raw: unknown): Action | null {
   const r = raw as Record<string, unknown>;
   switch (r.type) {
     case 'build': {
+      // One action builds one segment between two neighbouring tiles; stations are separate actions.
       if (typeof r.kind !== 'string' || !TRANSPORT_KINDS.includes(r.kind)) return null;
       const path = r.path;
-      if (!Array.isArray(path) || path.length < 2 || path.length > MAX_ROUTE_EDGES + 1) return null;
-      const seen = new Set<number>();
-      for (let i = 0; i < path.length; i++) {
-        const t: unknown = path[i];
-        if (!isInt(t) || !validTile(grid, t) || seen.has(t)) return null;
-        if (i > 0 && !isAdjacent(grid, path[i - 1] as number, t)) return null;
-        seen.add(t);
-      }
-      return {
-        type: 'build',
-        kind: r.kind as TransportKind,
-        path: path as number[],
-        stationStart: r.stationStart === true,
-        stationEnd: r.stationEnd === true,
-      };
+      if (!Array.isArray(path) || path.length !== 2) return null;
+      const [a, b] = path as unknown[];
+      if (!isInt(a) || !isInt(b) || !validTile(grid, a) || !validTile(grid, b) || !isAdjacent(grid, a, b)) return null;
+      return { type: 'build', kind: r.kind as TransportKind, path: [a, b] };
     }
     case 'station': {
       if (typeof r.kind !== 'string' || !STATION_KINDS.includes(r.kind)) return null;
@@ -56,11 +46,11 @@ export function sanitizeAction(grid: Grid, raw: unknown): Action | null {
   }
 }
 
-export function sanitizeOrders(map: MapData, input: unknown): SanitizeResult {
-  if (!Array.isArray(input) || input.length > ACTION_SLOTS) return { ok: false, error: 'slots_invalid' };
+export function sanitizeOrders(map: MapData, input: unknown, slotCount: number): SanitizeResult {
+  if (!Array.isArray(input) || input.length > slotCount) return { ok: false, error: 'slots_invalid' };
   const grid = { width: map.width, height: map.height };
   const slots: OrderSlots = [];
-  for (let i = 0; i < ACTION_SLOTS; i++) {
+  for (let i = 0; i < slotCount; i++) {
     const raw: unknown = input[i];
     if (raw === null || raw === undefined) {
       slots.push(null);
@@ -73,6 +63,6 @@ export function sanitizeOrders(map: MapData, input: unknown): SanitizeResult {
   return { ok: true, slots };
 }
 
-export function emptySlots(): OrderSlots {
-  return Array.from({ length: ACTION_SLOTS }, () => null);
+export function emptySlots(count: number): OrderSlots {
+  return Array.from({ length: count }, () => null);
 }

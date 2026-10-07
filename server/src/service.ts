@@ -3,6 +3,7 @@ import { randomBytes, randomInt } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   REPORTS_KEPT,
+  World,
   acceptAlliance,
   activePlayers,
   declineAlliance,
@@ -12,10 +13,13 @@ import {
   createGame,
   emptySlots,
   normalizeSettings,
+  placeBid,
   placeHq,
+  repayLoan,
   resolveTurn,
   sanitizeOrders,
   startGame,
+  takeLoan,
 } from '@transport/shared';
 import type {
   ClientView,
@@ -108,7 +112,7 @@ export class GameService {
     return {
       game: game.state,
       you: player ? { playerId: player.id, isHost: player.isHost } : null,
-      orders: player ? (game.orders[player.id] ?? { slots: emptySlots(), ready: false, updatedAt: 0 }) : null,
+      orders: player ? (game.orders[player.id] ?? { slots: emptySlots(game.state.settings.actionSlots), ready: false, updatedAt: 0 }) : null,
       ready: Object.fromEntries(game.state.players.map((p) => [p.id, game.orders[p.id]?.ready ?? false])),
       lastReportTurn: game.reports.length ? game.reports[game.reports.length - 1].turn : null,
       serverTime: this.now(),
@@ -146,7 +150,7 @@ export class GameService {
     if (game.state.phase !== 'running') throw new ApiError(409, 'not_running');
     const player = game.state.players.find((p) => p.id === playerId)!;
     if (player.hq === null) throw new ApiError(409, 'no_hq');
-    const result = sanitizeOrders(game.map, body?.slots);
+    const result = sanitizeOrders(game.map, body?.slots, game.state.settings.actionSlots);
     if (!result.ok) throw new ApiError(400, result.error);
     game.orders[playerId] = { slots: result.slots, ready: body?.ready === true, updatedAt: this.now() };
     this.changed(game.state.id);
@@ -176,6 +180,31 @@ export class GameService {
         throw new ApiError(400, 'invalid_request');
     }
     if (error) throw new ApiError(409, error.code);
+    this.changed(game.state.id);
+  }
+
+  /** Take or repay a loan: a free action that takes effect immediately. */
+  loan(id: string, token: string | null, body: { action?: unknown; amount?: unknown }): void {
+    const game = this.game(id);
+    const playerId = this.requirePlayer(game, token);
+    const amount = typeof body?.amount === 'number' ? body.amount : NaN;
+    const world = new World(game.map, game.state);
+    let error;
+    if (body?.action === 'take') error = takeLoan(world, playerId, amount);
+    else if (body?.action === 'repay') error = repayLoan(world, playerId, amount);
+    else throw new ApiError(400, 'invalid_request');
+    if (error) throw new ApiError(409, error.code, error);
+    this.changed(game.state.id);
+  }
+
+  /** Bid on a share auction: a free action; the money is reserved until somebody bids more. */
+  bid(id: string, token: string | null, body: { auction?: unknown; amount?: unknown }): void {
+    const game = this.game(id);
+    const playerId = this.requirePlayer(game, token);
+    const auction = typeof body?.auction === 'number' ? body.auction : NaN;
+    const amount = typeof body?.amount === 'number' ? body.amount : NaN;
+    const error = placeBid(game.state, playerId, auction, amount, this.now());
+    if (error) throw new ApiError(409, error.code, error);
     this.changed(game.state.id);
   }
 

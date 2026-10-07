@@ -2,10 +2,13 @@
 import { Terrain } from './types';
 import type { CargoId, IndustryTypeId, StationKind, TerrainId, TransportKind, VehicleModelId } from './types';
 
-export const ACTION_SLOTS = 5;
+/** Actions (slots) per player per turn; the host can choose between MIN and MAX when creating a game. */
+export const DEFAULT_ACTION_SLOTS = 5;
+export const MIN_ACTION_SLOTS = 3;
+export const MAX_ACTION_SLOTS = 20;
 /** Simulation steps per turn. Vehicle speeds are expressed in tiles per turn. */
 export const TICKS_PER_TURN = 40;
-/** Maximum number of track/road segments one build action may contain. */
+/** Longest route the route tool plans in one go (it is then built one segment per action). */
 export const MAX_ROUTE_EDGES = 64;
 export const MAX_VEHICLES_PER_ACTION = 5;
 /** Part of the purchase price you get back when selling a vehicle. */
@@ -42,6 +45,8 @@ export interface CargoDef {
   color: string;
   /** Base revenue in € per unit per tile of (straight line) distance. */
   price: number;
+  /** false: the price does not move with the market (passengers). */
+  market?: boolean;
 }
 
 export const CARGO: Record<CargoId, CargoDef> = {
@@ -64,12 +69,20 @@ export const CARGO: Record<CargoId, CargoDef> = {
   },
   tools: { id: 'tools', name: 'Gereedschap', icon: '🔧', color: '#5b7c99', price: 75 },
   goods: { id: 'goods', name: 'Goederen', icon: '📦', color: '#a0784f', price: 85 },
+  passengers: { id: 'passengers', name: 'Passagiers', icon: '👥', color: '#5aa9e6', price: 16, market: false },
 };
 
 export const CARGO_IDS = Object.keys(CARGO) as CargoId[];
+/** Cargo traded on the market (passengers have a fixed price). */
+export const MARKET_CARGO = CARGO_IDS.filter((c) => CARGO[c].market !== false);
 
 /** Cargo that cities can ask for. Every city wants food, the rest is distributed. */
 export const CITY_CARGO: CargoId[] = ['food', 'goods', 'fuel', 'tools', 'construction_materials'];
+
+/** Passengers a city produces per turn per inhabitant. They want to travel to another city. */
+export const PASSENGERS_PER_INHABITANT = 1 / 40;
+/** Passengers waiting in a city are capped at this many turns of production. */
+export const CITY_STOCK_TURNS = 3;
 
 export interface IndustryDef {
   id: IndustryTypeId;
@@ -267,15 +280,17 @@ export interface StationDef {
 }
 
 export const STATIONS: Record<StationKind, StationDef> = {
-  road: { id: 'road', name: 'Vrachtstation', prefix: 'Laadplaats', icon: '🚏', cost: 30_000, upkeep: 1_000, radius: 2, transport: 'road' },
-  rail: { id: 'rail', name: 'Treinstation', prefix: 'Station', icon: '🚉', cost: 90_000, upkeep: 3_000, radius: 3, transport: 'rail' },
-  water: { id: 'water', name: 'Haven', prefix: 'Haven', icon: '⚓', cost: 100_000, upkeep: 3_000, radius: 3, transport: 'canal' },
+  road: { id: 'road', name: 'Wegstation', prefix: 'Wegstation', icon: '🚏', cost: 30_000, upkeep: 1_000, radius: 1, transport: 'road' },
+  rail: { id: 'rail', name: 'Treinstation', prefix: 'Station', icon: '🚉', cost: 90_000, upkeep: 3_000, radius: 1, transport: 'rail' },
+  water: { id: 'water', name: 'Haven', prefix: 'Haven', icon: '⚓', cost: 100_000, upkeep: 3_000, radius: 2, transport: 'canal' },
 };
 
 export interface VehicleModel {
   id: VehicleModelId;
   name: string;
   kind: StationKind;
+  /** Freight vehicles carry goods, passenger vehicles carry passengers between cities. */
+  carries: 'cargo' | 'passengers';
   icon: string;
   capacity: number;
   /** Tiles per turn. */
@@ -285,21 +300,24 @@ export interface VehicleModel {
 }
 
 export const VEHICLES: Record<VehicleModelId, VehicleModel> = {
-  truck: { id: 'truck', name: 'Vrachtwagen', kind: 'road', icon: '🚚', capacity: 20, speed: 40, price: 45_000, upkeep: 4_000 },
+  truck: { id: 'truck', name: 'Vrachtwagen', kind: 'road', carries: 'cargo', icon: '🚚', capacity: 20, speed: 40, price: 45_000, upkeep: 4_000 },
   truck_heavy: {
     id: 'truck_heavy',
     name: 'Zware vrachtwagen',
     kind: 'road',
+    carries: 'cargo',
     icon: '🚛',
     capacity: 32,
     speed: 32,
     price: 75_000,
     upkeep: 6_000,
   },
+  bus: { id: 'bus', name: 'Bus', kind: 'road', carries: 'passengers', icon: '🚌', capacity: 25, speed: 44, price: 50_000, upkeep: 4_000 },
   train_steam: {
     id: 'train_steam',
     name: 'Stoomtrein',
     kind: 'rail',
+    carries: 'cargo',
     icon: '🚂',
     capacity: 90,
     speed: 56,
@@ -310,23 +328,47 @@ export const VEHICLES: Record<VehicleModelId, VehicleModel> = {
     id: 'train_diesel',
     name: 'Dieseltrein',
     kind: 'rail',
+    carries: 'cargo',
     icon: '🚆',
     capacity: 140,
     speed: 88,
     price: 380_000,
     upkeep: 24_000,
   },
-  barge: { id: 'barge', name: 'Binnenvaartschip', kind: 'water', icon: '🛥️', capacity: 150, speed: 22, price: 140_000, upkeep: 9_000 },
+  train_passenger: {
+    id: 'train_passenger',
+    name: 'Passagierstrein',
+    kind: 'rail',
+    carries: 'passengers',
+    icon: '🚄',
+    capacity: 120,
+    speed: 80,
+    price: 280_000,
+    upkeep: 18_000,
+  },
+  barge: {
+    id: 'barge',
+    name: 'Binnenvaartschip',
+    kind: 'water',
+    carries: 'cargo',
+    icon: '🛥️',
+    capacity: 150,
+    speed: 22,
+    price: 140_000,
+    upkeep: 9_000,
+  },
   cargo_ship: {
     id: 'cargo_ship',
     name: 'Vrachtschip',
     kind: 'water',
+    carries: 'cargo',
     icon: '🚢',
     capacity: 280,
     speed: 30,
     price: 260_000,
     upkeep: 16_000,
   },
+  ferry: { id: 'ferry', name: 'Veerboot', kind: 'water', carries: 'passengers', icon: '⛴️', capacity: 120, speed: 30, price: 140_000, upkeep: 9_000 },
 };
 
 export const VEHICLE_IDS = Object.keys(VEHICLES) as VehicleModelId[];
@@ -362,4 +404,41 @@ export const MARKET = {
   reaction: 0.35,
   /** Random noise amplitude per turn. */
   noise: 0.02,
+};
+
+/** Headquarters: deliveries on a line whose two stations both lie within `radius` tiles (Chebyshev) get a bonus. */
+export const HQ_BONUS = {
+  radius: 10,
+  bonus: 0.25,
+};
+
+/** Loans: free actions, taken and repaid in steps; interest is charged every turn. */
+export const LOANS = {
+  step: 250_000,
+  /** Interest per turn on the outstanding debt. */
+  rate: 0.02,
+  /** Credit limit = base + bookFactor × book value of vehicles, stations and infrastructure. */
+  base: 500_000,
+  bookFactor: 0.5,
+  /** Book value as a fraction of what things cost. */
+  bookValue: 0.5,
+};
+
+/** Auctions of industry shares: free actions. */
+export const AUCTIONS = {
+  /** Auctions start after this many turns. */
+  startAfterTurn: 10,
+  /** Industries that put a share up for auction every turn. */
+  perTurn: 3,
+  sharesPerIndustry: 10,
+  /** A new bid must be at least this much higher than the current one. */
+  minIncrement: 0.05,
+  /** An auction without bids closes after this many turns. */
+  expireTurns: 3,
+  /** Part of other players' revenue from an industry's cargo that goes to each share. */
+  tollPerShare: 0.03,
+  /** With this many shares you decide who may pick up cargo at the industry. */
+  majority: 6,
+  /** Starting price = production per turn × cargo price × this factor. */
+  minBidFactor: 8,
 };

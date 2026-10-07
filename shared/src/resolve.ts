@@ -1,7 +1,9 @@
 // Turn resolution: executes the action slots of all players in order, then simulates the turn.
-import { ACTION_SLOTS, TICKS_PER_TURN } from './config';
+import { closeAuctions, openAuctions } from './auctions';
+import { DEFAULT_ACTION_SLOTS, TICKS_PER_TURN } from './config';
 import { executeSlot } from './construction';
 import type { SlotEntry } from './construction';
+import { chargeInterest } from './finance';
 import { marketDemand, updateMarket } from './market';
 import { Rng, hashSeed } from './rng';
 import { chargeUpkeep, simulateTurn } from './simulation';
@@ -26,9 +28,15 @@ export function activePlayers(state: GameState): PlayerId[] {
     .sort();
 }
 
+/** Empty finance record at the start of a turn. */
+export function newFinance(money: number): Finance {
+  return { start: money, construction: 0, vehicles: 0, revenue: 0, tolls: 0, dividends: 0, upkeep: 0, interest: 0, end: 0 };
+}
+
 /**
- * Pure function: returns the next state and a report. `orders` maps player id to the 5 slots.
+ * Pure function: returns the next state and a report. `orders` maps player id to their action slots.
  * Slot 1 of every player is executed first (simultaneously), then slot 2, and so on.
+ * Auctions whose highest bid stood a full turn close before the slots; new ones open at the end.
  */
 export function resolveTurn(map: MapData, previous: GameState, orders: Record<PlayerId, OrderSlots>, now: number): TurnOutcome {
   const state = cloneState(previous);
@@ -40,14 +48,17 @@ export function resolveTurn(map: MapData, previous: GameState, orders: Record<Pl
     slots: [],
     finances: {},
     deliveries: [],
+    auctions: [],
     market: [],
     replay: { ticks: TICKS_PER_TURN, vehicles: [], events: [] },
   };
   const fin: Record<PlayerId, Finance> = {};
-  for (const p of state.players) fin[p.id] = { start: p.money, construction: 0, vehicles: 0, revenue: 0, upkeep: 0, end: 0 };
+  for (const p of state.players) fin[p.id] = newFinance(p.money);
 
+  closeAuctions(state, report);
   const active = activePlayers(state);
-  for (let slot = 1; slot <= ACTION_SLOTS; slot++) {
+  const slots = state.settings.actionSlots ?? DEFAULT_ACTION_SLOTS;
+  for (let slot = 1; slot <= slots; slot++) {
     const entries: SlotEntry[] = [];
     for (const player of active) {
       const action = orders[player]?.[slot - 1];
@@ -62,7 +73,9 @@ export function resolveTurn(map: MapData, previous: GameState, orders: Record<Pl
 
   const supply = simulateTurn(world, report, fin);
   chargeUpkeep(world, fin);
+  chargeInterest(state, fin);
   updateMarket(state.market, marketDemand(map, state.industries), supply, rng, report);
+  openAuctions(state, rng, report);
 
   for (const p of state.players) {
     fin[p.id].end = p.money;

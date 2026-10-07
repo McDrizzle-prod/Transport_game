@@ -1,7 +1,7 @@
 // Start screen: create a game, join with a code, or continue one of your games.
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { DEFAULT_START_MONEY, MAP_SIZES, PLAYER_COLORS } from '@transport/shared';
+import { DEFAULT_ACTION_SLOTS, DEFAULT_START_MONEY, MAP_SIZES, MAX_ACTION_SLOTS, MIN_ACTION_SLOTS, PLAYER_COLORS } from '@transport/shared';
 import type { GameSummary, TurnSchedule } from '@transport/shared';
 import { ApiError, api } from '../api';
 import { GAME_TITLE, errorText } from '../i18n';
@@ -88,6 +88,7 @@ function CreateCard() {
   const [color, setColor] = useState<string>(PLAYER_COLORS[0]);
   const [mapSize, setMapSize] = useState(64);
   const [maxPlayers, setMaxPlayers] = useState(4);
+  const [actionSlots, setActionSlots] = useState(DEFAULT_ACTION_SLOTS);
   const [mode, setMode] = useState<TurnSchedule['mode']>('daily');
   const [time, setTime] = useState('20:00');
   const [minutes, setMinutes] = useState(60);
@@ -115,6 +116,7 @@ function CreateCard() {
         settings: {
           mapSize,
           maxPlayers,
+          actionSlots,
           schedule,
           resolveWhenAllReady: early,
           startMoney,
@@ -166,6 +168,17 @@ function CreateCard() {
             </select>
           </label>
         </div>
+        <label>
+          Acties per beurt
+          <select value={actionSlots} onChange={(e) => setActionSlots(Number(e.target.value))}>
+            {Array.from({ length: MAX_ACTION_SLOTS - MIN_ACTION_SLOTS + 1 }, (_, i) => MIN_ACTION_SLOTS + i).map((n) => (
+              <option key={n} value={n}>
+                {n} acties
+              </option>
+            ))}
+          </select>
+          <small className="muted">Elk stuk weg of spoor en elk station kost 1 actie. Meer acties = sneller bouwen.</small>
+        </label>
         <fieldset>
           <legend>Wanneer wordt een beurt uitgevoerd?</legend>
           <label className="radio">

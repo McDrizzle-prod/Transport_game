@@ -4,6 +4,7 @@ import type { RefObject } from 'react';
 import { useStore, useUi } from '../state/store';
 import type { Tab } from '../state/store';
 import { ActionsTab } from './ActionsTab';
+import { ExchangeTab } from './ExchangeTab';
 import { HelpTab } from './HelpTab';
 import { InfoTab } from './InfoTab';
 import { LobbyTab } from './LobbyTab';
@@ -16,6 +17,7 @@ const TABS: { id: Tab; icon: string; label: string }[] = [
   { id: 'info', icon: 'ℹ️', label: 'Info' },
   { id: 'report', icon: '📰', label: 'Rapport' },
   { id: 'market', icon: '📈', label: 'Markt' },
+  { id: 'exchange', icon: '💼', label: 'Beurs' },
   { id: 'players', icon: '👥', label: 'Spelers' },
   { id: 'help', icon: '❓', label: 'Uitleg' },
 ];
@@ -58,6 +60,7 @@ export function Sheet() {
   const phase = useUi((s) => s.view!.game.phase);
   const hasReport = useUi((s) => s.report !== null);
   const invited = useUi((s) => !!s.view?.game.invites.some((i) => i.to === s.view?.you?.playerId));
+  const auctions = useUi((s) => !!s.view?.game.auctions.some((a) => a.status === 'open'));
   return (
     <aside ref={ref} className={`sheet ${open ? 'open' : 'closed'}`}>
       <div className="sheet-tabs" role="tablist">
@@ -72,7 +75,7 @@ export function Sheet() {
           >
             <span>{t.icon}</span>
             <span className="sheet-tab-label">{t.id === 'actions' && phase === 'lobby' ? 'Start' : t.label}</span>
-            {((t.id === 'report' && hasReport) || (t.id === 'players' && invited)) && <i className="dot" />}
+            {((t.id === 'report' && hasReport) || (t.id === 'players' && invited) || (t.id === 'exchange' && auctions)) && <i className="dot" />}
           </button>
         ))}
         <button className="sheet-toggle" onClick={() => store.toggleSheet()} aria-label={open ? 'Paneel inklappen' : 'Paneel uitklappen'}>
@@ -85,6 +88,7 @@ export function Sheet() {
           {tab === 'info' && <InfoTab />}
           {tab === 'report' && <ReportTab />}
           {tab === 'market' && <MarketTab />}
+          {tab === 'exchange' && <ExchangeTab />}
           {tab === 'players' && <PlayersTab />}
           {tab === 'help' && <HelpTab />}
         </div>

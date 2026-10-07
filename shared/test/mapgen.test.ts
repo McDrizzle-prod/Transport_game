@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { INDUSTRY_IDS, Terrain, TileUse, addPlayer, createGame, generateWorld, hqError, normalizeSettings, placeHq, startGame } from '../src';
+import { INDUSTRY_IDS, STATIONS, Terrain, TileUse, addPlayer, createGame, generateWorld, hqError, normalizeSettings, placeHq, startGame } from '../src';
 
 describe('map generation', () => {
   it('is deterministic for a seed', () => {
@@ -26,6 +26,14 @@ describe('map generation', () => {
         }
       }
     }
+    // Industries are far enough apart that one station can never serve two of them.
+    for (const a of industries) {
+      for (const b of industries) {
+        if (a === b) continue;
+        const gap = Math.max(a.x - (b.x + b.w - 1), b.x - (a.x + a.w - 1), a.y - (b.y + b.h - 1), b.y - (a.y + a.h - 1));
+        expect(gap).toBeGreaterThan(2 * STATIONS.road.radius);
+      }
+    }
     const water = map.terrain.filter((t) => t === Terrain.Water).length;
     expect(water).toBeGreaterThan(64 * 64 * 0.05);
     expect(water).toBeLessThan(64 * 64 * 0.35);
@@ -46,6 +54,9 @@ describe('game setup', () => {
     const water = map.terrain.findIndex((t) => t === Terrain.Water);
     expect(hqError(map, state, 'p2', water)?.code).toBe('hq_terrain');
 
+    expect(normalizeSettings({ actionSlots: 99 }, 1).actionSlots).toBe(20);
+    expect(normalizeSettings({}, 1).actionSlots).toBe(5);
+    expect(state.cityStock['1']).toBeGreaterThan(0);
     expect(startGame(state)).toBeNull();
     expect(state.phase).toBe('running');
     // After the start the headquarters can't be moved anymore.

@@ -8,12 +8,12 @@ function run(w: TestWorld, state: GameState, orders: Record<string, OrderSlots> 
   return resolveTurn(w.map, state, orders, 0);
 }
 
-/** Farm (west) and food plant (east) 22 tiles apart, connected by a road with truck stations. */
+/** Farm (west) and food plant (east) 22 tiles apart, connected by a road with truck stations next to them. */
 function farmToFoodPlant() {
   const w = makeWorld({ width: 32, height: 12 });
   const farm = addIndustry(w, 'farm', 2, 4, 60, 60);
   const plant = addIndustry(w, 'food_plant', 24, 4);
-  const path = hPath(w, 5, 22, 5);
+  const path = hPath(w, 4, 23, 5);
   const orders = {
     A: slots(
       { type: 'build', kind: 'road', path, stationStart: true, stationEnd: true },
@@ -56,8 +56,8 @@ describe('economy', () => {
     addIndustry(w, 'farm', 2, 4, 60, 60);
     addCity(w, 30, 5, { food: 50 });
     addIndustry(w, 'food_plant', 15, 4); // in the middle
-    const westPath = hPath(w, 5, 13, 5);
-    const eastPath = hPath(w, 18, 27, 5);
+    const westPath = hPath(w, 4, 14, 5);
+    const eastPath = hPath(w, 17, 28, 5);
     const orders = {
       A: slots(
         { type: 'build', kind: 'road', path: westPath, stationStart: true, stationEnd: true },
@@ -101,15 +101,24 @@ describe('economy', () => {
     expect(revenues[2]).toBeGreaterThan(0);
   });
 
-  it('lowers the price of a cargo that is delivered a lot, compared to a scarce one', () => {
-    const { w, orders } = farmToFoodPlant();
+  it('lowers the price of a cargo that is delivered a lot', () => {
+    const { w, path } = farmToFoodPlant();
     w.state.industries[0].rate = 80;
+    const orders = {
+      A: slots(
+        { type: 'build', kind: 'road', path, stationStart: true, stationEnd: true },
+        { type: 'vehicles', model: 'truck', from: path[0], to: path[path.length - 1], count: 5 },
+      ),
+    };
     let { state } = run(w, w.state, orders);
     for (let i = 0; i < 6; i++) state = run(w, state).state;
-    // Grain is delivered every turn; coal is wanted by nobody here but stays at its start price.
+    // ~80 of the 120 grain the food plant can use is delivered every turn: the price drops.
+    // Coal is wanted by nobody here and stays at its start price; passengers have a fixed price.
     expect(state.market.history.grain.length).toBeGreaterThan(5);
-    expect(state.market.prices.grain).toBeLessThan(state.market.prices.food + 0.1);
-    expect(state.market.supply.grain).toBeGreaterThan(0);
+    expect(state.market.supply.grain).toBeGreaterThan(60);
+    expect(state.market.prices.grain).toBeLessThan(0.95);
+    expect(state.market.prices.coal).toBe(1);
+    expect(state.market.prices.passengers).toBe(1);
   });
 
   it('estimates the earnings of a line before buying vehicles', () => {
@@ -118,7 +127,7 @@ describe('economy', () => {
     const world = new World(w.map, built.state);
     const est = estimateLine(world, 'A', 'truck', path[0], path[path.length - 1], 2)!;
     expect(est.connected).toBe(true);
-    expect(est.length).toBe(17);
+    expect(est.length).toBe(19);
     expect(est.flows.some((f) => f.cargo === 'grain' && f.direction === 0)).toBe(true);
     expect(est.revenuePerTurn).toBeGreaterThan(0);
     expect(est.firstDeliveryTurns).toBeLessThan(1);

@@ -31,7 +31,7 @@ describe('alliances', () => {
     const w = makeWorld({ width: 32, height: 12 });
     addIndustry(w, 'farm', 2, 4, 60, 60);
     addIndustry(w, 'food_plant', 24, 4);
-    const path = hPath(w, 5, 22, 5);
+    const path = hPath(w, 4, 23, 5);
     const built = resolveTurn(w.map, w.state, { A: slots({ type: 'build', kind: 'road', path, stationStart: true, stationEnd: true }) }, 0);
     const buyB = { B: slots({ type: 'vehicles', model: 'truck', from: path[0], to: path[path.length - 1], count: 1 }) };
 

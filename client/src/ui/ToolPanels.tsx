@@ -1,5 +1,19 @@
 // Panels for the active tool: lay a route, place a station, buy vehicles, place the headquarters.
-import { CARGO, INDUSTRIES, MAX_ROUTE_EDGES, MAX_VEHICLES_PER_ACTION, MIN_HQ_DISTANCE, STATIONS, TICKS_PER_TURN, TRANSPORT, VEHICLES, checkStationTile, coverageAt, estimateLine } from '@transport/shared';
+import {
+  CARGO,
+  HQ_BONUS,
+  INDUSTRIES,
+  MAX_VEHICLES_PER_ACTION,
+  MIN_HQ_DISTANCE,
+  STATIONS,
+  TICKS_PER_TURN,
+  TRANSPORT,
+  VEHICLES,
+  checkStationTile,
+  cityPassengers,
+  coverageAt,
+  estimateLine,
+} from '@transport/shared';
 import type { CargoId, StationKind, VehicleModelId } from '@transport/shared';
 import { dec, money, num, tileLabel } from '../format';
 import { TRANSPORT_ICON, cargoLabel, errorText, msgText, reasonText } from '../i18n';
@@ -12,28 +26,26 @@ function SlotTarget() {
   return slot < 0 ? <span className="badge failed">alle slots vol</span> : <span className="badge slotbadge">→ slot {slot + 1}</span>;
 }
 
+/** Free action slots: a route needs one per segment. */
+function FreeSlots() {
+  const store = useStore();
+  useUi((s) => s.draft);
+  const free = store.freeSlots().length;
+  return <span className={`badge ${free ? 'slotbadge' : 'failed'}`}>{free ? `${free} vrije acties` : 'alle slots vol'}</span>;
+}
+
 export function RouteToolPanel() {
   const store = useStore();
   const tool = useUi((s) => s.tool);
+  const hover = useUi((s) => s.hover);
   useUi((s) => s.draft);
   if (tool.kind !== 'route') return null;
-  const plan = store.routePlan();
-  const slot = store.targetSlot();
+  const plan = store.routePlan(hover);
+  const actions = plan ? store.routeActions(plan) : [];
+  const free = store.freeSlots().length;
   const stationKind = TRANSPORT[tool.transport].station;
-  const stationCost = stationKind ? STATIONS[stationKind].cost : 0;
-  const ok = !!plan?.path && !plan.error && !plan.plan?.fatal;
   const blocked = plan?.plan?.blocked ?? [];
-  const step =
-    tool.waypoints.length === 0
-      ? 'Tik op de kaart waar de route moet beginnen (bijv. naast een industrie).'
-      : tool.waypoints.length === 1
-        ? 'Tik op het eindpunt. Tussenpunten zijn ook mogelijk om de route te sturen.'
-        : 'Tik om de route te verlengen, of zet hem in een actieslot.';
-
-  const confirm = () => {
-    if (!plan?.path) return;
-    store.addAction({ type: 'build', kind: tool.transport, path: plan.path, stationStart: tool.stationStart, stationEnd: tool.stationEnd });
-  };
+  const name = TRANSPORT[tool.transport].name.toLowerCase();
 
   return (
     <section className="panel-section tool-panel">
@@ -41,55 +53,55 @@ export function RouteToolPanel() {
         <h3>
           {TRANSPORT_ICON[tool.transport]} {TRANSPORT[tool.transport].name} aanleggen
         </h3>
-        <SlotTarget />
+        <FreeSlots />
       </div>
-      <p className="hint">{step}</p>
-      {plan?.error && <p className="error">{errorText(plan.error)}</p>}
+      <p className="hint">
+        {tool.start === null
+          ? `Tik op het begin van je ${name}, daarna op het eind. De route wordt dan meteen in je actieslots gezet.`
+          : `Tik nu op het eind. Je ${name} komt direct in je vrije actieslots, daarna kun je weer gewoon de kaart gebruiken.`}
+      </p>
+      <p className="muted small">
+        Elk stuk van tegel naar tegel kost <strong>1 actie</strong> (een station ook). Kies dus waar je je acties aan besteedt: wat je deze beurt
+        niet kwijt kunt, bouw je volgende beurt verder.
+      </p>
+      {plan?.error && hover !== null && <p className="error">{errorText(plan.error)}</p>}
       {plan?.plan?.fatal && <p className="error">{msgText(plan.plan.fatal)}</p>}
-      {plan?.path && plan.plan && (
+      {plan?.path && plan.plan && !plan.error && (
         <p className="route-summary">
-          <strong>{money(plan.plan.cost)}</strong> · {num(plan.path.length - 1)} stukken{' '}
-          <span className="muted small">(max. {MAX_ROUTE_EDGES} per actie)</span>
+          <strong>{num(actions.length)} acties</strong> · {money(plan.plan.cost)}
+          {actions.length > free && <span className="warn small"> · past niet helemaal: {free} vrij, de rest volgende beurt</span>}
         </p>
       )}
-      <p className="muted small desktop-only">
-        {money(TRANSPORT[tool.transport].edgeCost)} per stuk op gras; bos, heuvels, bruggen en tunnels zijn duurder. Je eigen netwerk hergebruiken is
-        gratis.
-      </p>
-      {blocked.length > 0 && (
-        <p className="warn">⚠ {blocked.length} tegel(s) zijn al van een andere speler; daar kun je niet bouwen.</p>
-      )}
+      {blocked.length > 0 && <p className="warn">⚠ {blocked.length} tegel(s) zijn al van een andere speler; daar kun je niet bouwen.</p>}
       {stationKind && (
         <div className="checks">
           <label className="check">
             <input type="checkbox" checked={tool.stationStart} onChange={(e) => store.setTool({ ...tool, stationStart: e.target.checked })} />
-            {STATIONS[stationKind].icon} {STATIONS[stationKind].name} aan het begin
+            {STATIONS[stationKind].icon} {STATIONS[stationKind].name} aan het begin (+1 actie)
           </label>
           <label className="check">
             <input type="checkbox" checked={tool.stationEnd} onChange={(e) => store.setTool({ ...tool, stationEnd: e.target.checked })} />
-            {STATIONS[stationKind].icon} {STATIONS[stationKind].name} aan het eind
+            {STATIONS[stationKind].icon} {STATIONS[stationKind].name} aan het eind (+1 actie)
           </label>
           <span className="muted small">
-            {money(stationCost)} per station · bereik {STATIONS[stationKind].radius} tegels rondom
+            {money(STATIONS[stationKind].cost)} per station · bereik {STATIONS[stationKind].radius} tegel rondom: bouw het direct naast een industrie of
+            stad.
           </span>
         </div>
       )}
+      <p className="muted small desktop-only">
+        {money(TRANSPORT[tool.transport].edgeCost)} per stuk op gras; bos, heuvels, bruggen en tunnels zijn duurder. Je eigen netwerk hergebruiken kost
+        geen actie.
+      </p>
       {tool.transport === 'canal' && (
         <p className="muted small">Schepen varen vrij over open water. Een kanaal verbindt water over land; bouw er havens (⚓) naast.</p>
       )}
       <div className="button-row">
-        <button
-          className="secondary"
-          disabled={tool.waypoints.length === 0}
-          onClick={() => store.setTool({ ...tool, waypoints: tool.waypoints.slice(0, -1) })}
-        >
-          ↶ Punt terug
+        <button className="secondary" disabled={tool.start === null} onClick={() => store.setTool({ ...tool, start: null })}>
+          ↶ Ander beginpunt
         </button>
         <button className="secondary" onClick={() => store.setTool({ kind: 'inspect' })}>
           Annuleren
-        </button>
-        <button className="primary" disabled={!ok || slot < 0} onClick={confirm}>
-          ✓ {tool.editSlot !== null ? 'Bijwerken' : 'In slot'} {slot + 1}
         </button>
       </div>
     </section>
@@ -116,7 +128,7 @@ export function StationToolPanel() {
   return (
     <section className="panel-section tool-panel">
       <div className="section-head">
-        <h3>🚉 Station bouwen</h3>
+        <h3>🚉 Station bouwen · 1 actie</h3>
         <SlotTarget />
       </div>
       <div className="segmented">
@@ -130,7 +142,9 @@ export function StationToolPanel() {
         ))}
       </div>
       <p className="hint">
-        {tool.tile === null ? 'Tik op een tegel naast industrieën of een stad.' : `Gekozen tegel ${tileLabel(tool.tile, width)}.`}
+        {tool.tile === null
+          ? 'Tik op een tegel direct naast een industrie of stad: het bereik is klein.'
+          : `Gekozen tegel ${tileLabel(tool.tile, width)}.`}
         {tool.station === 'water' && ' Een haven moet aan het water liggen.'}
       </p>
       {check && !check.ok && <p className="error">Kan hier niet: {reasonText(check.reason)}</p>}
@@ -182,7 +196,10 @@ export function CoverageList({ industries, cities }: { industries: number[]; cit
             <span className="cov-icon">🏙️</span>
             <span>
               <strong>{city.name}</strong>
-              <small>vraagt {Object.keys(city.demand).map((c) => cargoLabel(c as CargoId)).join(', ')}</small>
+              <small>
+                vraagt {Object.keys(city.demand).map((c) => cargoLabel(c as CargoId)).join(', ')} · 👥 {cityPassengers(city)} passagiers per beurt
+                naar andere steden
+              </small>
             </span>
           </li>
         );
@@ -192,10 +209,12 @@ export function CoverageList({ industries, cities }: { industries: number[]; cit
 }
 
 const MODEL_GROUPS: { kind: StationKind; label: string; models: VehicleModelId[] }[] = [
-  { kind: 'road', label: 'Weg', models: ['truck', 'truck_heavy'] },
-  { kind: 'rail', label: 'Spoor', models: ['train_steam', 'train_diesel'] },
-  { kind: 'water', label: 'Water', models: ['barge', 'cargo_ship'] },
+  { kind: 'road', label: 'Weg', models: ['truck', 'truck_heavy', 'bus'] },
+  { kind: 'rail', label: 'Spoor', models: ['train_steam', 'train_diesel', 'train_passenger'] },
+  { kind: 'water', label: 'Water', models: ['barge', 'cargo_ship', 'ferry'] },
 ];
+
+const unit = (id: VehicleModelId) => (VEHICLES[id].carries === 'passengers' ? 'passagiers' : 'ton');
 
 export function VehicleToolPanel() {
   const store = useStore();
@@ -242,7 +261,7 @@ export function VehicleToolPanel() {
                   <span className="model-icon">{m.icon}</span>
                   <span className="model-name">{m.name}</span>
                   <span className="model-stats">
-                    {m.capacity} ton · {m.speed} tegels/beurt
+                    {m.capacity} {unit(id)} · {m.speed} tegels/beurt
                     <br />
                     {money(m.price)} + {money(m.upkeep)}/beurt
                   </span>
@@ -254,10 +273,11 @@ export function VehicleToolPanel() {
       </div>
       <p className="hint">
         {tool.from === null
-          ? `Tik op het eerste ${STATIONS[model.kind].name.toLowerCase()} (van jou, mag ook gepland zijn).`
+          ? 'Tik op het eerste station (van jou of een bondgenoot; geplande stations tellen ook). Het soort voertuig past zich aan.'
           : tool.to === null
-            ? 'Tik op het tweede station.'
+            ? `Tik op het tweede ${STATIONS[model.kind].name.toLowerCase()}.`
             : `${fromStation?.name ?? tileLabel(tool.from, width)} ⇄ ${toStation?.name ?? tileLabel(tool.to, width)}`}
+        {model.carries === 'passengers' && ' Passagiers reizen tussen stations bij twee verschillende steden.'}
       </p>
       {kindMismatch && <p className="error">Dit voertuig past niet bij dit soort station.</p>}
       <div className="stepper">
@@ -287,11 +307,21 @@ export function VehicleToolPanel() {
             <dt>Eerste opbrengst</dt>
             <dd>{est.firstDeliveryTurns <= 1 ? 'deze beurt' : `na ±${Math.ceil(est.firstDeliveryTurns)} beurten`}</dd>
             <dt>Capaciteit</dt>
-            <dd>{num(est.capacityPerTurn)} ton per beurt per richting</dd>
+            <dd>
+              {num(est.capacityPerTurn)} {unit(tool.model)} per beurt per richting
+            </dd>
+            {est.hqBonus && (
+              <>
+                <dt>Hoofdkantoor</dt>
+                <dd className="pos">+{Math.round(HQ_BONUS.bonus * 100)}% bonus (beide stations in de buurt van je HQ)</dd>
+              </>
+            )}
           </dl>
           {est.flows.length === 0 ? (
             <p className="warn">
-              Geen vracht tussen deze stations: zorg dat bij het ene station iets wordt geproduceerd dat bij het andere station wordt gevraagd.
+              {model.carries === 'passengers'
+                ? 'Geen passagiers tussen deze stations: beide stations moeten bij een (andere) stad liggen.'
+                : 'Geen vracht tussen deze stations: zorg dat bij het ene station iets wordt geproduceerd dat bij het andere station wordt gevraagd.'}
             </p>
           ) : (
             <table className="flows">
@@ -308,6 +338,8 @@ export function VehicleToolPanel() {
                   <tr key={k}>
                     <td>
                       {CARGO[f.cargo].icon} {f.direction === 0 ? '→' : '←'} <small>{f.consumer.name}</small>
+                      {f.excludedBy && <small className="neg"> · alleen voor {store.playerName(f.excludedBy)} (meerderheid aandelen)</small>}
+                      {f.toll > 0 && <small className="muted"> · {Math.round(f.toll * 100)}% naar aandeelhouders</small>}
                     </td>
                     <td>{dec(f.distance)}</td>
                     <td>{num(f.amountPerTurn)}</td>
@@ -328,8 +360,8 @@ export function VehicleToolPanel() {
             <dd>{est.paybackTurns !== null ? `${dec(est.paybackTurns)} beurten` : '—'}</dd>
           </dl>
           <p className="muted small">
-            Opbrengst = hoeveelheid × prijs × marktprijs × hemelsbrede afstand tussen herkomst en bestemming. Geld komt binnen zodra een voertuig
-            aankomt.
+            Opbrengst = hoeveelheid × prijs × marktprijs × hemelsbrede afstand tussen herkomst en bestemming (voor passagiers: tussen de twee steden).
+            Geld komt binnen zodra een voertuig aankomt.
           </p>
         </div>
       )}
@@ -364,7 +396,11 @@ export function HqToolPanel() {
       <h3>🏢 Plaats je hoofdkantoor</h3>
       <p className="hint">
         Tik op een vrije plek op de kaart. Het hoofdkantoor moet minstens {MIN_HQ_DISTANCE} tegels van andere hoofdkantoren staan. Kies een plek
-        bij interessante industrieën: daar begint je imperium.
+        bij interessante industrieën en steden: daar begint je imperium.
+      </p>
+      <p className="small">
+        🏢 <strong>Bonus:</strong> leveringen tussen twee stations die allebei binnen {HQ_BONUS.radius} tegels van je hoofdkantoor liggen, leveren{' '}
+        {Math.round(HQ_BONUS.bonus * 100)}% extra op (het gestippelde vierkant op de kaart).
       </p>
       {tool.kind !== 'hq' && (
         <button className="primary" onClick={() => store.setTool({ kind: 'hq' })}>

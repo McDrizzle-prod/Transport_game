@@ -5,7 +5,7 @@
 | Wens | Status in deze versie |
 | --- | --- |
 | Kaart met industrieën (productieketens) en steden, hoofdkantoor plaatsen | ✅ |
-| 5 actieslots, gelijktijdig uitgevoerd op een vast tijdstip per dag | ✅ (ook: elke N minuten of handmatig) |
+| Actieslots, gelijktijdig uitgevoerd op een vast tijdstip per dag | ✅ standaard 5, instelbaar 3–20 (ook: elke N minuten of handmatig) |
 | Conflictregel: laagste slot wint, zelfde slot = gedeeld gebruik | ✅ per tegel, zichtbaar in rapport en afspeelfunctie |
 | Wegen, sporen, waterwegen + voertuigen tussen twee industrieën | ✅ (plus stations, havens, kanalen, voertuigen verkopen) |
 | Goederen uitwisselen bij stations aan twee industrieën | ✅ |
@@ -13,61 +13,62 @@
 | Variërende snelheden: pas geld bij aankomst | ✅ |
 | Marktmechanisme (vraag en aanbod) | 🟡 basisversie: prijs per goed op de hele kaart + verzadiging per stad |
 | Allianties: elkaars netwerk gebruiken | 🟡 basisversie: voorstellen/accepteren/verlaten, netwerk en stations delen |
-| Veilingen voor aandelen in industrieën | ⬜ ontwerpvoorstel hieronder |
-| Schulden → gedwongen verkoop van eigen aandelen → laatste alliantie wint | ⬜ ontwerpvoorstel hieronder |
+| **Testronde 1:** steden vragen producten én willen onderling verbonden worden (passagiers) | ✅ bus, passagierstrein, veerboot |
+| **Testronde 1:** routegereedschap stopt na het tweede punt | ✅ route gaat direct in de vrije slots |
+| **Testronde 1:** station kiezen bij voertuigen | ✅ tik op of naast een station; het soort voertuig past zich aan |
+| **Testronde 1:** bonus in een straal rond het hoofdkantoor | ✅ +25% binnen 10 tegels |
+| **Testronde 1:** lenen en bieden kosten geen actieslot | ✅ tabblad Beurs |
+| **Testronde 1:** na 10 beurten elke beurt aandelen (10%) van 3 industrieën in de veiling; een bod moet een hele beurt het hoogste blijven | ✅ |
+| **Testronde 1:** kleiner bereik van stations | ✅ 1 tegel (haven 2); industrieën liggen verder uit elkaar |
+| **Testronde 1:** 1 actie per tegel weg/spoor en per station | ✅ |
+| Veilingen voor aandelen in industrieën (exclusief gebruik / winstdeling) | ✅ basisversie, zie hieronder |
+| Schulden → gedwongen verkoop van eigen aandelen → laatste alliantie wint | 🟡 leningen zijn er; aandelen van bedrijven en het eindspel nog niet |
 
-De laatste twee hangen sterk samen (beide draaien om aandelen, waarde en veilingen). Daarom stel ik voor ze samen
-in drie iteraties te bouwen, in deze volgorde: eerst geld lenen, dan aandelen van bedrijven, dan aandelen van
-industrieën. Elke stap is op zichzelf speelbaar.
+### Gemaakte keuzes bij testronde 1 (graag feedback)
+
+- **"Aandelen van 3 bedrijven"** is gelezen als: aandelen van 3 *industrieën* (de veilingen uit de oorspronkelijke
+  wensenlijst). Aandelen van spelersbedrijven horen bij het eindspel hieronder.
+- **Wat een aandeel oplevert**: 3% per aandeel van wat *andere* spelers verdienen met vracht van die industrie, en
+  bij 6 of meer aandelen bepaal je dat alleen jij en je bondgenoten er mogen laden. Beide getallen staan in
+  `AUCTIONS` in `shared/src/config.ts`.
+- **Een bod moet een hele beurt het hoogste blijven**: een bod uit beurt T wint aan het eind van beurt T+1. Zonder
+  bod vervalt een veiling na 3 beurten.
+- **Geld voor een bod** wordt meteen gereserveerd, zodat niemand meer kan bieden dan hij heeft.
+- **Hoofdkantoorbonus**: beide stations van een lijn moeten binnen 10 tegels van het hoofdkantoor liggen (Chebyshev,
+  dus een vierkant van 21 × 21 tegels).
+- **1 actie per tegel**: één stuk van tegel naar tegel is één actie; bestaande stukken (eigen netwerk, stadsstraten,
+  open water) kosten niets. Omdat 5 acties dan weinig is, kan de host het aantal acties per beurt kiezen (3–20).
+- **Passagiers**: 1 per 40 inwoners per beurt, vaste prijs € 16 per passagier per tegel tussen de twee steden.
 
 ---
 
-## Iteratie 1 — Bedrijfswaarde, leningen en schuld
+## Volgende iteraties
 
-Fundament voor alles wat met aandelen te maken heeft.
+### Aandelen van bedrijven en het eindspel
 
-- **Bedrijfswaarde** per beurt berekenen: geld + boekwaarde van infrastructuur, stations en voertuigen (bv. 50%
-  van de aanschafprijs) − schuld. Tonen in het spelersoverzicht en als grafiekje.
-- **Lenen en aflossen** in stappen van € 250.000, tot een kredietlimiet (bv. 50% van de bedrijfswaarde), met rente
-  per beurt (bv. 2%). Rente en aflossing worden bij de uitvoering verrekend.
-- **Noodlening**: eindigt een beurt met een negatief saldo, dan volgt automatisch een dure lening.
-- **In nood**: schuld boven de kredietlimiet → status "in nood". In iteratie 2 leidt dat tot gedwongen verkoop
-  van aandelen.
-
-Technisch: `Company { loans: Loan[] }` in de spelstaat, rente in `chargeUpkeep`, waardeberekening in `economy.ts`.
-
-## Iteratie 2 — Aandelen van bedrijven en het eindspel
+Bouwt voort op de leningen en de veilingen die er nu zijn.
 
 - Elk bedrijf heeft **10 aandelen**; de oprichter begint met alle 10.
-- **Kapitaal ophalen**: een speler zet eigen aandelen in de **veiling**; de opbrengst gaat naar het bedrijf.
-  Past bij het spel met gelijktijdige beurten als **gesloten bod**: iedereen biedt tot het uitvoeringsmoment, de
-  hoogste bieder wint (gelijk = verdeeld of oudste bod).
+- **Kapitaal ophalen**: een speler zet eigen aandelen in de veiling (zelfde veilingsysteem als voor industrieën);
+  de opbrengst gaat naar het bedrijf.
 - **Dividend**: een deel van de winst per beurt gaat naar de aandeelhouders naar rato.
-- **Gedwongen verkoop**: een bedrijf dat "in nood" is moet elke beurt aandelen veilen tot de schuld weer onder de
-  limiet zit (minimumprijs = aandeel van de bedrijfswaarde).
+- **In nood**: schuld boven de kredietlimiet (bv. door rente of verliezen) → het bedrijf moet elke beurt aandelen
+  veilen tot de schuld weer onder de limiet zit (minimumprijs = aandeel van de bedrijfswaarde).
+- **Noodlening**: eindigt een beurt met een negatief saldo, dan volgt automatisch een dure lening.
 - **Zeggenschap**: wie meer dan 50% van een bedrijf heeft, bepaalt mee. Voorstel: het bedrijf komt automatisch in
   de alliantie van de meerderheidseigenaar; de oprichter speelt door als junior-partner of valt af.
 - **Einde van het spel**: zodra alle overgebleven bedrijven (direct of via meerderheidsaandelen) bij één alliantie
   horen, eindigt het spel en wint die alliantie. De server zet het spel dan op `finished` en toont een eindstand.
 
-Technisch: `shares: Record<PlayerId, number>` per bedrijf, `Auction { asset, shares, minBid, bids, closesTurn }`,
-afhandeling van veilingen in `resolveTurn` vóór slot 1 (zodat opgehaald geld in dezelfde beurt gebruikt kan
-worden), nieuw tabblad "Beurs".
+Technisch: `Player.shares`, veilingen met een `asset` (industrie of bedrijf) in plaats van alleen `industry`,
+afhandeling in `closeAuctions`, grafiek van de bedrijfswaarde in het tabblad Beurs.
 
-## Iteratie 3 — Aandelen in industrieën (veilingen)
+### Uitbreiding van de industrie-aandelen
 
-- Elke industrie heeft 10 aandelen, aanvankelijk van "de bank". Regelmatig (bv. elke beurt één industrie) komen
-  aandelen in de veiling, met hetzelfde gesloten-bod-systeem.
-- **Meerderheid (≥ 6 aandelen)**: kies per industrie tussen
-  - *exclusief gebruik*: alleen stations van jou en je bondgenoten mogen er laden; of
-  - *tol*: andere vervoerders betalen een percentage van hun opbrengst uit vracht van deze industrie aan de
-    aandeelhouders.
-- **Minderheid**: dividend naar rato uit de waarde van wat de industrie die beurt afzette ("een graantje
-  meepikken van andermans transport").
-- Optioneel: aandeelhouders kunnen investeren om de productie te verhogen.
-
-Technisch: `Industry.shares`, `Industry.policy`, aanpassing van de verdeling in `simulation.ts` (`pickup`) en van de
-opbrengst bij aflevering.
+- Keuze per industrie voor de meerderheidseigenaar: *exclusief* (zoals nu) of *tol* (iedereen mag laden maar betaalt
+  een hoger percentage).
+- Aandeelhouders kunnen investeren om de productie te verhogen.
+- Aandelen onderling verkopen (niet alleen van de bank kopen).
 
 ---
 
@@ -92,14 +93,19 @@ opbrengst bij aflevering.
 - Wachten op volle lading als optie per lijn.
 
 **Kaart, steden en industrieën**
-- Steden groeien door leveringen; industrieën groeien bij goede bediening (zoals in Transport Fever) of krimpen.
-- Een rol voor het **hoofdkantoor**, bijvoorbeeld een bouwstraal of korting in de buurt van het HQ.
+- Steden groeien door leveringen en passagiers; industrieën groeien bij goede bediening (zoals in Transport Fever) of krimpen.
+- Passagiers met een voorkeursbestemming (grote steden trekken meer) en post als extra lading.
 - Grotere kaarten en een kaarteditor.
+
+**Bediening**
+- Een geplande route in één keer verplaatsen naar andere slots (nu per stuk met ▲/▼).
+- Routes met tussenpunten (nu: begin en eind; voor een andere route plan je twee kortere stukken).
 
 ## Techniek
 
 - **Accounts** (bv. e-mail-link) in plaats van alleen een token in de browser, zodat je op elk apparaat verder kunt.
-- **Pushmeldingen** (Web Push) bij een uitgevoerde beurt, een alliantievoorstel of een aflopende deadline.
+- **Pushmeldingen** (Web Push) bij een uitgevoerde beurt, een alliantievoorstel, een overboden bod of een aflopende
+  deadline.
 - **Native apps** voor iOS/Android door de webclient in [Capacitor](https://capacitorjs.com) te verpakken
   (`VITE_API_URL` wijst dan naar de server).
 - **Database** (SQLite of PostgreSQL) in plaats van JSON-bestanden; back-ups.
@@ -112,17 +118,20 @@ opbrengst bij aflevering.
 ## Bekende beperkingen van de proof of concept
 
 - Geen slopen, geen lijnen met meerdere stops, geen bewerking van bestaande lijnen.
-- Het hoofdkantoor heeft nog geen spelinvloed.
-- De spelbalans is met simulaties ingesteld, niet met echte spelers.
+- De spelbalans is met simulaties ingesteld, niet met echte spelers. Met 5 acties per beurt duurt een eerste
+  verbinding een paar beurten; voor een snellere start kan de host meer acties kiezen.
+- Spellen uit de vorige versie kunnen worden geladen, maar zijn gemaakt met de oude kaart (industrieën dichter
+  bij elkaar); begin voor de nieuwe regels een nieuw spel.
 - Na de uitvoering zijn de acties van iedereen in het rapport te zien (bewust: zo zie je wat er gebeurde).
 - Spelers identificeren zich met een token in de browser; wie dat kwijtraakt (andere browser, gewist geheugen),
   kan niet meer als dat bedrijf spelen.
 
 ## Open vragen voor de volgende iteratie
 
-1. Moeten leningen, biedingen en aflossingen een actieslot kosten, of zijn het "vrije" acties naast de 5 slots?
+1. Klopt de lezing van "aandelen van 3 bedrijven" als aandelen van industrieën (zie hierboven)?
 2. Winnaar alleen als laatste alliantie, of ook na een vast aantal beurten op bedrijfswaarde?
 3. Mogen bondgenoten elkaar tol vragen, en wie bepaalt de hoogte?
 4. Wat gebeurt er met een speler wiens bedrijf door een ander wordt overgenomen: speelt hij door (junior-partner) of
    valt hij af?
-5. Welke rol wil je het hoofdkantoor geven?
+5. Is 25% binnen 10 tegels een goede hoofdkantoorbonus, of liever een kleinere straal / bonus die afneemt met de
+   afstand?

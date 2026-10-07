@@ -1,9 +1,10 @@
 // Building rules and execution of one action slot, including conflicts between players.
 //
-// Conflict rule (per tile): slots are executed in order 1..5 for all players at the same time.
+// Conflict rule (per tile): slots are executed in order 1, 2, 3, ... for all players at the same time.
 // A tile claimed in an earlier slot belongs to that player, so a later claim on it fails.
 // When several players claim the same free tile in the same slot, all of them get it (shared tile).
 import { LOAD_TICKS, MAX_ROUTE_EDGES, MAX_VEHICLES_PER_ACTION, STATIONS, TERRAIN, TICKS_PER_TURN, TRANSPORT, VEHICLES, VEHICLE_RESALE } from './config';
+import type { VehicleModel } from './config';
 import { crossingPair, distToRect, edgeKey, isAdjacent, neighbor, stepLength, tileX, tileY, validTile } from './geometry';
 import { findRoute } from './pathfind';
 import { Terrain, TileUse } from './types';
@@ -482,18 +483,20 @@ function executeSell(world: World, result: SlotResult, action: SellAction): void
   if (sold.length < action.count) result.messages.push({ code: 'sold_fewer', count: sold.length });
 }
 
-function findOrCreateLine(world: World, player: PlayerId, kind: StationKind, a: Station, b: Station): Line {
+function findOrCreateLine(world: World, player: PlayerId, model: VehicleModel, a: Station, b: Station): Line {
   const existing = world.state.lines.find(
     (l) =>
       l.owner === player &&
-      l.kind === kind &&
+      l.kind === model.kind &&
+      (l.carries ?? 'cargo') === model.carries &&
       ((l.stations[0] === a.id && l.stations[1] === b.id) || (l.stations[0] === b.id && l.stations[1] === a.id)),
   );
   if (existing) return existing;
   const line: Line = {
     id: world.nextId(),
     owner: player,
-    kind,
+    kind: model.kind,
+    carries: model.carries,
     stations: [a.id, b.id],
     name: `${a.name} – ${b.name}`,
     createdTurn: world.state.turn,
@@ -526,7 +529,7 @@ function executeVehicles(world: World, result: SlotResult, action: VehicleAction
   const money = world.player(player).money;
   if (cost > money) return fail('insufficient_funds', { cost, money });
 
-  const line = findOrCreateLine(world, player, model.kind, from, to);
+  const line = findOrCreateLine(world, player, model, from, to);
   const dir: 0 | 1 = line.stations[0] === from.id ? 0 : 1;
   const tripTicks = route.length / (model.speed / TICKS_PER_TURN) + LOAD_TICKS;
   const stagger = Math.max(1, Math.round((2 * tripTicks) / count));

@@ -13,7 +13,8 @@ export interface VehicleSprite {
 }
 
 export interface SlotMarker {
-  slot: number;
+  /** Slot number, or a range ("2–9") for a route planned as several actions. */
+  label: string;
   x: number;
   y: number;
   status: 'ok' | 'partial' | 'failed';
@@ -37,15 +38,22 @@ export type ToolOverlay =
   | {
       kind: 'route';
       transport: TransportKind;
-      waypoints: number[];
+      start: number | null;
+      /** Route from the start to the hovered tile. */
       path: number[] | null;
-      hoverPath: number[] | null;
       blocked: number[];
       label: string | null;
       ok: boolean;
     }
   | { kind: 'station'; station: StationKind; tile: number | null; ok: boolean; radius: number; covered: number[] }
-  | { kind: 'vehicles'; from: number | null; to: number | null; hover: number | null; candidates: number[] }
+  | {
+      kind: 'vehicles';
+      from: number | null;
+      to: number | null;
+      hover: number | null;
+      /** Stations the player may use; `match`: fits the chosen vehicle. */
+      candidates: { tile: number; match: boolean }[];
+    }
   | { kind: 'hq'; hover: number | null; ok: boolean; others: number[] };
 
 export interface ReplayView {
@@ -74,4 +82,6 @@ export interface Scene {
   texts: FloatingText[];
   replay: ReplayView | null;
   showGrid: boolean;
+  /** The player's headquarters bonus area. */
+  hqZone: { tile: number; radius: number; color: string; label: string } | null;
 }

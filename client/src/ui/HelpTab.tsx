@@ -1,46 +1,94 @@
 // Short explanation of the rules.
-import { ACTION_SLOTS, OVERSUPPLY_PRICE_FACTOR, STATIONS, TICKS_PER_TURN, TRANSPORT, VEHICLES, VEHICLE_IDS, VEHICLE_RESALE } from '@transport/shared';
+import {
+  AUCTIONS,
+  CARGO,
+  HQ_BONUS,
+  LOANS,
+  OVERSUPPLY_PRICE_FACTOR,
+  STATIONS,
+  TICKS_PER_TURN,
+  TRANSPORT,
+  VEHICLES,
+  VEHICLE_IDS,
+  VEHICLE_RESALE,
+} from '@transport/shared';
 import { money } from '../format';
+import { useUi } from '../state/store';
 
 export function HelpTab() {
+  const slots = useUi((s) => s.view?.game.settings.actionSlots ?? 5);
   return (
     <section className="panel-section help">
       <h3>Zo werkt het</h3>
-      <h4>Beurten en actieslots</h4>
+      <h4>Beurten en acties</h4>
       <p>
-        Iedere speler heeft per beurt {ACTION_SLOTS} actieslots. Op het vaste tijdstip worden de acties van alle spelers tegelijk uitgevoerd:
-        eerst slot 1 van iedereen, dan slot 2, enzovoort. Tot dat moment kun je je acties aanpassen en herschikken.
+        Iedere speler heeft per beurt <strong>{slots} acties</strong> (actieslots). Op het vaste tijdstip worden de acties van alle spelers tegelijk
+        uitgevoerd: eerst slot 1 van iedereen, dan slot 2, enzovoort. Tot dat moment kun je je acties aanpassen en herschikken.
       </p>
-      <h4>Conflicten</h4>
       <ul>
-        <li>Willen twee spelers op dezelfde tegel bouwen, dan krijgt degene met het <strong>laagste slot</strong> de tegel. De ander bouwt de rest van de route, maar niet over die tegel.</li>
-        <li>Hebben ze het <strong>hetzelfde slot</strong> gekozen, dan delen ze de tegel: beide spelers mogen er hun weg of spoor gebruiken.</li>
-        <li>Op tegels van een ander kun je later niet meer bouwen. Schuin kruisen zonder kruising mag niet.</li>
+        <li>
+          <strong>Elk stuk</strong> weg, spoor of kanaal (van een tegel naar de volgende) kost 1 actie. Een route van 8 stukken kost dus 8 acties: kies
+          waar je je acties aan besteedt en bouw lange verbindingen over meerdere beurten.
+        </li>
+        <li>Een station of haven bouwen kost 1 actie, voertuigen inzetten of verkopen ook.</li>
+        <li>
+          <strong>Lenen, aflossen en bieden</strong> op aandelen kosten géén actie (tabblad Beurs).
+        </li>
       </ul>
-      <h4>Verbindingen</h4>
+      <h4>Bouwen</h4>
       <ul>
+        <li>Kies Weg, Spoor of Kanaal, tik op het begin en daarna op het eind. De route komt meteen in je vrije slots en je bent weer klaar om de kaart te gebruiken.</li>
         <li>
           {TRANSPORT.road.name} ({money(TRANSPORT.road.edgeCost)}), {TRANSPORT.rail.name.toLowerCase()} ({money(TRANSPORT.rail.edgeCost)}) en{' '}
           {TRANSPORT.canal.name.toLowerCase()} ({money(TRANSPORT.canal.edgeCost)}) per stuk op vlak land. Bos, heuvels, bruggen en tunnels zijn
           duurder.
         </li>
         <li>
-          Een station bedient industrieën en steden binnen zijn bereik: {STATIONS.road.name.toLowerCase()} {STATIONS.road.radius}, treinstation{' '}
-          {STATIONS.rail.radius}, haven {STATIONS.water.radius} tegels.
+          Een station bedient alleen wat er <strong>direct naast</strong> ligt: {STATIONS.road.name.toLowerCase()} en treinstation{' '}
+          {STATIONS.rail.radius} tegel, haven {STATIONS.water.radius} tegels. Je moet industrieën dus echt met elkaar verbinden.
         </li>
-        <li>Stadsstraten zijn openbaar: vrachtwagens van iedereen mogen erover.</li>
-        <li>Schepen varen gratis over open water; een kanaal verbindt water over land.</li>
+        <li>Stadsstraten zijn openbaar: vrachtwagens en bussen van iedereen mogen erover. Schepen varen gratis over open water.</li>
       </ul>
-      <h4>Productieketens en geld</h4>
+      <h4>Conflicten</h4>
       <ul>
-        <li>Grondstoffen (graan, hout, kolen, erts, olie, steen) gaan naar fabrieken; fabrieken maken producten voor steden.</li>
+        <li>Willen twee spelers op dezelfde tegel bouwen, dan krijgt degene met het <strong>laagste slot</strong> de tegel. Het stuk van de ander mislukt.</li>
+        <li>Hebben ze het <strong>hetzelfde slot</strong> gekozen, dan delen ze de tegel: beide spelers mogen er hun weg of spoor gebruiken.</li>
+        <li>Op tegels van een ander kun je later niet meer bouwen. Schuin kruisen zonder kruising mag niet.</li>
+      </ul>
+      <h4>Industrieën en steden</h4>
+      <ul>
+        <li>Grondstoffen (graan, hout, kolen, erts, olie, steen) gaan naar fabrieken; fabrieken maken producten.</li>
         <li>
-          Opbrengst = hoeveelheid × prijs per ton per tegel × marktprijs × <strong>hemelsbrede afstand</strong> tussen de industrie van herkomst en de
-          bestemming.
+          <strong>Steden</strong> vragen producten (voedsel en 2–3 andere, zie de iconen bij de naam) én willen met elkaar verbonden worden: elke
+          stad heeft passagiers (👥) die naar een andere stad willen. Vervoer ze met bussen, passagierstreinen of veerboten tussen stations bij
+          twee steden ({money(CARGO.passengers.price)} per passagier per tegel, in beide richtingen).
         </li>
-        <li>Je verdient pas als een voertuig aankomt. Langzame schepen doen soms meerdere beurten over één rit.</li>
+        <li>
+          Opbrengst = hoeveelheid × prijs × marktprijs × <strong>hemelsbrede afstand</strong> tussen herkomst en bestemming. Je verdient pas als een
+          voertuig aankomt.
+        </li>
         <li>Steden betalen boven hun vraag maar {Math.round(OVERSUPPLY_PRICE_FACTOR * 100)}% van de prijs. Marktprijzen dalen als iedereen hetzelfde levert.</li>
         <li>Voertuigen, stations en infrastructuur kosten elke beurt onderhoud. Te veel voertuigen? Verkoop ze (via de stationsinfo) voor {Math.round(VEHICLE_RESALE * 100)}% van de prijs.</li>
+      </ul>
+      <h4>Hoofdkantoor</h4>
+      <p>
+        Leveringen tussen twee stations die allebei binnen <strong>{HQ_BONUS.radius} tegels</strong> van je hoofdkantoor liggen, leveren{' '}
+        <strong>{Math.round(HQ_BONUS.bonus * 100)}% extra</strong> op. Het gebied zie je als gestippeld vierkant op de kaart. Begin dus dicht bij huis.
+      </p>
+      <h4>Beurs</h4>
+      <ul>
+        <li>
+          Lenen in stappen van {money(LOANS.step)}, tot {money(LOANS.base)} plus de helft van de boekwaarde van je bezit. Rente:{' '}
+          {Math.round(LOANS.rate * 100)}% per beurt.
+        </li>
+        <li>
+          Na beurt {AUCTIONS.startAfterTurn} komt er elke beurt van {AUCTIONS.perTurn} industrieën een aandeel (10%) in de veiling. Een bod blijft
+          staan tot iemand hoger biedt; staat het een hele beurt als hoogste, dan is het aandeel van jou.
+        </li>
+        <li>
+          Per aandeel krijg je {Math.round(AUCTIONS.tollPerShare * 100)}% van wat anderen met vracht van die industrie verdienen. Met{' '}
+          {AUCTIONS.majority} aandelen mogen alleen jij en je bondgenoten er laden.
+        </li>
       </ul>
       <h4>Allianties</h4>
       <ul>
@@ -64,7 +112,9 @@ export function HelpTab() {
               <td>
                 {VEHICLES[id].icon} {VEHICLES[id].name}
               </td>
-              <td>{VEHICLES[id].capacity}</td>
+              <td>
+                {VEHICLES[id].capacity} {VEHICLES[id].carries === 'passengers' ? '👥' : 'ton'}
+              </td>
               <td>{VEHICLES[id].speed}</td>
               <td>{money(VEHICLES[id].price)}</td>
             </tr>

@@ -950,6 +950,14 @@ details[open] summary {
   color: var(--accent-ink);
 }
 
+.slot-num.range {
+  width: auto;
+  min-width: 26px;
+  padding: 0 7px;
+  border-radius: 13px;
+  white-space: nowrap;
+}
+
 .slot-empty-text {
   color: var(--muted);
   font-size: 0.85rem;
@@ -1543,4 +1551,60 @@ ul.plain {
 .player-main .link {
   align-self: flex-start;
   padding: 2px 0;
+}
+
+/* --- Exchange (loans, auctions, shares) ------------------------------------ */
+
+.auctions {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.auction {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.auction.mine {
+  border-color: var(--ok);
+}
+
+.auction p {
+  margin: 4px 0;
+}
+
+.auction-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.auction .copy-row input {
+  min-width: 0;
+}
+
+.shares {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.shares p {
+  margin: 2px 0;
+}
+
+.slot.empty.folded {
+  opacity: 0.7;
+}
+
+.form label small {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.8rem;
 }

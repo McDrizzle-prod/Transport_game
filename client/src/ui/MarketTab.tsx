@@ -1,6 +1,6 @@
 // Market prices per cargo: current multiplier, change, trend and last turn's supply vs. demand.
 import { useState } from 'react';
-import { CARGO, CARGO_IDS } from '@transport/shared';
+import { CARGO, MARKET_CARGO } from '@transport/shared';
 import type { CargoId } from '@transport/shared';
 import { money, num } from '../format';
 import { useUi } from '../state/store';
@@ -12,7 +12,7 @@ export function MarketTab() {
       <h3>Markt</h3>
       <p className="hint">
         Prijzen reageren op vraag en aanbod op de hele kaart: wordt een goed veel geleverd, dan daalt de prijs; is het schaars, dan stijgt hij.
-        ×1,00 is de basisprijs.
+        ×1,00 is de basisprijs. Passagiers hebben een vaste prijs ({money(CARGO.passengers.price)} per passagier per tegel).
       </p>
       <table className="market-table">
         <thead>
@@ -24,7 +24,7 @@ export function MarketTab() {
           </tr>
         </thead>
         <tbody>
-          {CARGO_IDS.map((c) => (
+          {MARKET_CARGO.map((c) => (
             <MarketRow
               key={c}
               cargo={c}

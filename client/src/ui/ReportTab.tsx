@@ -1,5 +1,5 @@
 // Result of the last executed turn: per slot what happened (incl. conflicts), finances, deliveries.
-import { CARGO } from '@transport/shared';
+import { CARGO, INDUSTRIES } from '@transport/shared';
 import type { SlotResult, TurnReport } from '@transport/shared';
 import { money, num, signedMoney, tileLabel, when } from '../format';
 import { OUTCOME_TEXT, actionTitle, msgText } from '../i18n';
@@ -39,8 +39,26 @@ export function ReportTab() {
           <dd className="neg">−{money(fin.vehicles)}</dd>
           <dt>Opbrengst ritten</dt>
           <dd className="pos">+{money(fin.revenue)}</dd>
+          {(fin.tolls ?? 0) > 0 && (
+            <>
+              <dt>Aan aandeelhouders</dt>
+              <dd className="neg">−{money(fin.tolls)}</dd>
+            </>
+          )}
+          {(fin.dividends ?? 0) > 0 && (
+            <>
+              <dt>Van je aandelen</dt>
+              <dd className="pos">+{money(fin.dividends)}</dd>
+            </>
+          )}
           <dt>Onderhoud</dt>
           <dd className="neg">−{money(fin.upkeep)}</dd>
+          {(fin.interest ?? 0) > 0 && (
+            <>
+              <dt>Rente</dt>
+              <dd className="neg">−{money(fin.interest)}</dd>
+            </>
+          )}
           <dt>Eind</dt>
           <dd>
             <strong>{money(fin.end)}</strong> <span className={fin.end - fin.start >= 0 ? 'pos' : 'neg'}>({signedMoney(fin.end - fin.start)})</span>
@@ -49,7 +67,38 @@ export function ReportTab() {
       )}
       <SlotResults report={report} />
       <Deliveries report={report} />
+      <AuctionResults report={report} />
     </section>
+  );
+}
+
+function AuctionResults({ report }: { report: TurnReport }) {
+  const store = useStore();
+  const game = useUi((s) => s.view!.game);
+  const results = report.auctions ?? [];
+  if (results.length === 0) return null;
+  const name = (id: number) => {
+    const ind = game.industries.find((i) => i.id === id);
+    return ind ? `${INDUSTRIES[ind.type].icon} ${ind.name}` : `Industrie ${id}`;
+  };
+  return (
+    <>
+      <h4>Beurs</h4>
+      <ul className="plain small">
+        {results.map((r) => (
+          <li key={`${r.auction}${r.status}`}>
+            {r.status === 'opened' && `🔨 Nieuw in de veiling: 10% van ${name(r.industry)}`}
+            {r.status === 'sold' && `✅ 10% van ${name(r.industry)} verkocht aan ${store.playerName(r.winner!)} voor ${money(r.price ?? 0)}`}
+            {r.status === 'expired' && `⌛ Geen bieders voor ${name(r.industry)}`}
+          </li>
+        ))}
+      </ul>
+      {results.some((r) => r.status === 'opened') && (
+        <button className="link small" onClick={() => store.setTab('exchange')}>
+          Naar de beurs →
+        </button>
+      )}
+    </>
   );
 }
 
@@ -59,12 +108,14 @@ function SlotResults({ report }: { report: TurnReport }) {
   const width = useUi((s) => s.map!.width);
   const me = view.you?.playerId;
   const colors = new Map(view.game.players.map((p) => [p.id, p.color]));
-  const slots = [1, 2, 3, 4, 5].map((slot) =>
-    report.slots.filter((r) => r.slot === slot).sort((a, b) => (a.player === me ? -1 : b.player === me ? 1 : 0)),
+  const count = report.slots.reduce((max, r) => Math.max(max, r.slot), 0);
+  const slots = Array.from({ length: count }, (_, i) =>
+    report.slots.filter((r) => r.slot === i + 1).sort((a, b) => (a.player === me ? -1 : b.player === me ? 1 : 0)),
   );
   return (
     <>
       <h4>Uitvoering per actieslot</h4>
+      {count === 0 && <p className="muted small">Niemand had acties gepland.</p>}
       <ol className="report-slots">
         {slots.map((results, i) => (
           <li key={i}>
@@ -134,6 +185,8 @@ function Deliveries({ report }: { report: TurnReport }) {
   const lineName = (id: number) => view.game.lines.find((l) => l.id === id)?.name ?? `Lijn ${id}`;
   const totals = new Map<string, number>();
   for (const d of report.deliveries) totals.set(d.player, (totals.get(d.player) ?? 0) + d.revenue);
+  const bonus = mine.reduce((s, d) => s + (d.bonus ?? 0), 0);
+  const tolls = mine.reduce((s, d) => s + (d.toll ?? 0), 0);
   return (
     <>
       <h4>Leveringen</h4>
@@ -157,11 +210,20 @@ function Deliveries({ report }: { report: TurnReport }) {
                   {CARGO[d.cargo].icon} {num(d.amount)}
                 </td>
                 <td>{d.trips}</td>
-                <td>{money(d.revenue)}</td>
+                <td>
+                  {money(d.revenue)}
+                  {(d.bonus ?? 0) > 0 && <small className="pos"> 🏢</small>}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+      )}
+      {(bonus > 0 || tolls > 0) && (
+        <p className="small">
+          {bonus > 0 && <span className="pos">🏢 Hoofdkantoorbonus: {money(bonus)} (zit in de opbrengst). </span>}
+          {tolls > 0 && <span className="neg">📜 Afgedragen aan aandeelhouders: {money(tolls)}.</span>}
+        </p>
       )}
       {totals.size > 0 && (
         <p className="small muted">

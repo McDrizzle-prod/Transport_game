@@ -14,4 +14,6 @@ export * from './planner';
 export * from './validate';
 export * from './game';
 export * from './alliances';
+export * from './auctions';
+export * from './finance';
 export * from './api';

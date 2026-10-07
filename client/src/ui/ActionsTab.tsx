@@ -1,8 +1,11 @@
-// The 5 action slots plus the panel of the active tool.
-import { ACTION_SLOTS, estimateLine } from '@transport/shared';
+// The action slots plus the panel of the active tool.
+import { useState } from 'react';
+import { TRANSPORT, estimateLine } from '@transport/shared';
 import type { Action, SlotResult } from '@transport/shared';
-import { money } from '../format';
-import { OUTCOME_TEXT, actionTitle, msgText } from '../i18n';
+import { money, num, tileLabel } from '../format';
+import { OUTCOME_TEXT, TRANSPORT_ICON, actionTitle, msgText } from '../i18n';
+import { groupPath, slotGroups, slotRange } from '../state/groups';
+import type { SlotGroup } from '../state/groups';
 import { useStore, useUi } from '../state/store';
 import { useNow } from './hooks';
 import { HqToolPanel, RouteToolPanel, StationToolPanel, VehicleToolPanel } from './ToolPanels';
@@ -45,6 +48,20 @@ function SlotList() {
   const total = (preview?.results ?? []).reduce((sum, r) => sum + (r?.cost ?? 0), 0);
   const left = me.money - total;
   const deadline = view.game.deadline;
+  const used = draft.filter(Boolean).length;
+  // Long rows of empty slots at the end are folded into one line.
+  let last = -1;
+  draft.forEach((a, i) => {
+    if (a) last = i;
+  });
+  const foldFrom = last + 2;
+  const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
+  const toggle = (start: number) => {
+    const next = new Set(expanded);
+    if (!next.delete(start)) next.add(start);
+    setExpanded(next);
+  };
+  const row = (i: number) => <SlotRow key={i} index={i} action={draft[i]} result={preview?.results[i] ?? null} highlighted={highlight === i} />;
 
   return (
     <section className="panel-section">
@@ -53,14 +70,45 @@ function SlotList() {
         <span className={`sync ${sync}`}>{SYNC_TEXT[sync]}</span>
       </div>
       <p className="hint">
-        Slot 1 gaat eerst, tegelijk met slot 1 van alle andere spelers. Bouwen twee spelers op dezelfde tegel, dan wint het laagste slot; bij
-        hetzelfde slot delen ze de tegel.
+        {used} van {draft.length} acties gebruikt. Elk stuk weg, spoor of kanaal (van tegel naar tegel) en elk station kost 1 actie. Slot 1 gaat
+        eerst, tegelijk met slot 1 van alle andere spelers: bouwen twee spelers op dezelfde tegel, dan wint het laagste slot; bij hetzelfde slot
+        delen ze de tegel.
       </p>
       <ol className="slots">
-        {draft.map((a, i) => (
-          <SlotRow key={i} index={i} action={a} result={preview?.results[i] ?? null} highlighted={highlight === i} />
-        ))}
+        {slotGroups(draft).map((g) => {
+          const i = g.start;
+          if (g.end > g.start) {
+            // A route of several segments: one row, which can be unfolded.
+            const open = expanded.has(g.start);
+            return [
+              <GroupRow
+                key={`g${i}`}
+                group={g}
+                results={preview?.results ?? []}
+                highlighted={highlight !== null && highlight >= g.start && highlight <= g.end}
+                open={open}
+                onToggle={() => toggle(g.start)}
+              />,
+              ...(open ? Array.from({ length: g.end - g.start + 1 }, (_, k) => row(g.start + k)) : []),
+            ];
+          }
+          if (i < foldFrom || draft[i]) return row(i);
+          if (i !== foldFrom) return null;
+          return (
+            <li key={i} className="slot empty folded">
+              <span className="slot-num">…</span>
+              <span className="slot-empty-text">
+                Slot {i + 1}–{draft.length} zijn ook nog leeg
+              </span>
+            </li>
+          );
+        })}
       </ol>
+      {used > 0 && (
+        <button className="link small" onClick={() => store.clearSlots()}>
+          Alle acties wissen
+        </button>
+      )}
       <div className="slots-total">
         <span>
           Kosten <strong>{money(total)}</strong>
@@ -96,6 +144,67 @@ function formatShort(ms: number): string {
   if (m < 60) return `${m} min`;
   const h = Math.floor(m / 60);
   return h < 24 ? `${h} u ${m % 60} min` : `${Math.floor(h / 24)} d ${h % 24} u`;
+}
+
+/** Several segments of one route, planned in consecutive slots. */
+function GroupRow({
+  group,
+  results,
+  highlighted,
+  open,
+  onToggle,
+}: {
+  group: SlotGroup;
+  results: (SlotResult | null)[];
+  highlighted: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const store = useStore();
+  const draft = useUi((s) => s.draft);
+  const width = useUi((s) => s.map!.width);
+  const first = draft[group.start];
+  if (first?.type !== 'build') return null;
+  const path = groupPath(draft, group);
+  const indices = Array.from({ length: group.end - group.start + 1 }, (_, k) => group.start + k);
+  const outcomes = indices.map((i) => results[i]?.outcome ?? 'ok');
+  const status = outcomes.every((o) => o === 'ok') ? 'ok' : outcomes.every((o) => o === 'failed') ? 'failed' : 'partial';
+  const cost = indices.reduce((sum, i) => sum + (results[i]?.cost ?? 0), 0);
+  const problems = indices.flatMap((i) =>
+    (results[i]?.messages ?? []).filter((m) => m.code !== 'nothing_to_build').map((m) => `Slot ${i + 1}: ${msgText(m, store.playerName)}`),
+  );
+  return (
+    <li className={`slot group ${status} ${highlighted ? 'highlighted' : ''}`} onClick={() => store.highlight(Math.floor((group.start + group.end) / 2))}>
+      <span className="slot-num range">{slotRange(group)}</span>
+      <div className="slot-body">
+        <div className="slot-title">
+          {TRANSPORT_ICON[first.kind]} {TRANSPORT[first.kind].name} {tileLabel(path[0], width)} → {tileLabel(path[path.length - 1], width)}
+        </div>
+        <div className="slot-sub">
+          <span>
+            {num(indices.length)} stukken = {num(indices.length)} acties · {money(cost)}
+          </span>
+          <span className={`badge ${status}`}>{status === 'ok' ? 'Haalbaar' : OUTCOME_TEXT[status]}</span>
+        </div>
+        {problems.length > 0 && (
+          <ul className="slot-msgs">
+            {problems.slice(0, 3).map((p, k) => (
+              <li key={k}>{p}</li>
+            ))}
+            {problems.length > 3 && <li>… en {problems.length - 3} meer</li>}
+          </ul>
+        )}
+      </div>
+      <div className="slot-actions" onClick={(e) => e.stopPropagation()}>
+        <button className="icon-btn" title={open ? 'Inklappen' : 'Per stuk tonen'} aria-label={open ? 'Inklappen' : 'Per stuk tonen'} onClick={onToggle}>
+          {open ? '▴' : '▾'}
+        </button>
+        <button className="icon-btn danger" title="Hele route verwijderen" aria-label="Hele route verwijderen" onClick={() => store.removeSlots(group.start, group.end)}>
+          ✕
+        </button>
+      </div>
+    </li>
+  );
 }
 
 function SlotRow({ index, action, result, highlighted }: { index: number; action: Action | null; result: SlotResult | null; highlighted: boolean }) {
@@ -140,12 +249,14 @@ function SlotRow({ index, action, result, highlighted }: { index: number; action
         <button className="icon-btn" title="Eerder uitvoeren" disabled={index === 0} onClick={() => store.moveSlot(index, -1)}>
           ▲
         </button>
-        <button className="icon-btn" title="Later uitvoeren" disabled={index === ACTION_SLOTS - 1} onClick={() => store.moveSlot(index, 1)}>
+        <button className="icon-btn" title="Later uitvoeren" disabled={index === store.slotCount() - 1} onClick={() => store.moveSlot(index, 1)}>
           ▼
         </button>
-        <button className="icon-btn" title="Bewerken" disabled={action.type === 'sell'} onClick={() => store.editSlot(index)}>
-          ✎
-        </button>
+        {(action.type === 'station' || action.type === 'vehicles') && (
+          <button className="icon-btn" title="Bewerken" onClick={() => store.editSlot(index)}>
+            ✎
+          </button>
+        )}
         <button className="icon-btn danger" title="Verwijderen" onClick={() => store.removeSlot(index)}>
           ✕
         </button>

@@ -62,6 +62,8 @@ export const api = {
   resolve: (id: string, token: string) => call('POST', `/api/games/${id}/resolve`, {}, token),
   alliance: (id: string, token: string, action: 'invite' | 'accept' | 'decline' | 'leave', player?: string) =>
     call('POST', `/api/games/${id}/alliance`, { action, player }, token),
+  loan: (id: string, token: string, action: 'take' | 'repay', amount: number) => call('POST', `/api/games/${id}/loan`, { action, amount }, token),
+  bid: (id: string, token: string, auction: number, amount: number) => call('POST', `/api/games/${id}/bid`, { auction, amount }, token),
 };
 
 function wsUrl(gameId: string, token: string | null): string {

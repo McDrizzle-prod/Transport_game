@@ -37,7 +37,8 @@ export type CargoId =
   | 'fuel'
   | 'construction_materials'
   | 'tools'
-  | 'goods';
+  | 'goods'
+  | 'passengers';
 
 export type IndustryTypeId =
   | 'farm'
@@ -54,7 +55,16 @@ export type IndustryTypeId =
   | 'tools_factory'
   | 'goods_factory';
 
-export type VehicleModelId = 'truck' | 'truck_heavy' | 'train_steam' | 'train_diesel' | 'barge' | 'cargo_ship';
+export type VehicleModelId =
+  | 'truck'
+  | 'truck_heavy'
+  | 'bus'
+  | 'train_steam'
+  | 'train_diesel'
+  | 'train_passenger'
+  | 'barge'
+  | 'cargo_ship'
+  | 'ferry';
 
 export type CargoAmounts = Partial<Record<CargoId, number>>;
 
@@ -108,6 +118,8 @@ export interface Industry {
   input: CargoAmounts;
   /** Statistics of the last resolved turn. */
   stats: { produced: number; shipped: number; received: CargoAmounts };
+  /** Shares (of 10) owned by players; the rest belongs to the bank. */
+  shares: Record<PlayerId, number>;
 }
 
 export interface TileInfra {
@@ -136,7 +148,10 @@ export interface InfraState {
 export interface CargoLot {
   cargo: CargoId;
   amount: number;
-  /** Industry the cargo came from (revenue is based on the distance from there). */
+  /**
+   * Where the cargo came from (revenue is based on the distance from there): an industry id,
+   * or a city id for passengers.
+   */
   origin: number;
 }
 
@@ -160,6 +175,8 @@ export interface Line {
   id: number;
   owner: PlayerId;
   kind: StationKind;
+  /** Freight lines and passenger lines between the same stations are separate lines. */
+  carries: 'cargo' | 'passengers';
   stations: [number, number];
   name: string;
   createdTurn: number;
@@ -189,8 +206,14 @@ export interface Finance {
   start: number;
   construction: number;
   vehicles: number;
+  /** Earned with deliveries, including the headquarters bonus (before tolls). */
   revenue: number;
+  /** Paid out of that revenue to shareholders of the industries the cargo came from. */
+  tolls: number;
+  /** Received as a shareholder from other players' deliveries. */
+  dividends: number;
   upkeep: number;
+  interest: number;
   end: number;
 }
 
@@ -203,6 +226,8 @@ export interface Player {
   isHost: boolean;
   joinedAt: number;
   last: Finance | null;
+  /** Outstanding loans. */
+  debt: number;
 }
 
 export type TurnSchedule =
@@ -218,6 +243,8 @@ export interface GameSettings {
   schedule: TurnSchedule;
   /** Resolve the turn early as soon as every player has marked their orders as ready. */
   resolveWhenAllReady: boolean;
+  /** Number of actions (slots) per player per turn. */
+  actionSlots: number;
 }
 
 export interface MarketState {
@@ -243,6 +270,25 @@ export interface AllianceInvite {
   at: number;
 }
 
+export interface Bid {
+  player: PlayerId;
+  amount: number;
+  /** Turn during which the bid was placed. */
+  turn: number;
+  at: number;
+}
+
+/** Auction of one share (10%) of an industry. The money of the highest bid is reserved. */
+export interface Auction {
+  id: number;
+  industry: number;
+  openedTurn: number;
+  minBid: number;
+  bids: Bid[];
+  status: 'open' | 'sold' | 'expired';
+  closedTurn?: number;
+}
+
 export type GamePhase = 'lobby' | 'running' | 'finished';
 
 export interface GameState {
@@ -260,6 +306,8 @@ export interface GameState {
   industries: Industry[];
   /** Deliveries per city during the last turn. */
   cityStats: Record<string, CargoAmounts>;
+  /** Passengers waiting in each city for transport. */
+  cityStock: Record<string, number>;
   infra: InfraState;
   stations: Station[];
   lines: Line[];
@@ -268,16 +316,17 @@ export interface GameState {
   /** Allied players may use each other's roads, tracks, canals and stations. */
   alliances: Alliance[];
   invites: AllianceInvite[];
+  auctions: Auction[];
   nextId: number;
 }
 
 // ---------------------------------------------------------------------------
-// Orders (the 5 action slots)
+// Orders (the action slots)
 
 export interface BuildAction {
   type: 'build';
   kind: TransportKind;
-  /** Consecutive (8-neighbour) tiles. */
+  /** Consecutive (8-neighbour) tiles. Players build one segment (two tiles) per action. */
   path: number[];
   stationStart?: boolean;
   stationEnd?: boolean;
@@ -356,7 +405,12 @@ export interface Delivery {
   lineId: number;
   cargo: CargoId;
   amount: number;
+  /** Revenue including the headquarters bonus, before tolls. */
   revenue: number;
+  /** Part of the revenue that is headquarters bonus. */
+  bonus: number;
+  /** Paid to shareholders of the industry the cargo came from. */
+  toll: number;
   trips: number;
 }
 
@@ -379,12 +433,22 @@ export interface ReplayEvent {
   revenue: number;
 }
 
+export interface AuctionResult {
+  auction: number;
+  industry: number;
+  status: 'opened' | 'sold' | 'expired';
+  winner?: PlayerId;
+  price?: number;
+}
+
 export interface TurnReport {
   turn: number;
   resolvedAt: number;
   slots: SlotResult[];
   finances: Record<PlayerId, Finance>;
   deliveries: Delivery[];
+  /** Auctions that were closed (at the start) or opened (at the end) of this turn. */
+  auctions: AuctionResult[];
   market: { cargo: CargoId; before: number; after: number; supplied: number; demand: number }[];
   replay: { ticks: number; vehicles: ReplayVehicle[]; events: ReplayEvent[] };
 }

@@ -1,6 +1,6 @@
 // A GameState plus lookup indexes. Rules operate on a World so they don't have to rebuild indexes.
 import type { Grid } from './geometry';
-import type { Edge, GameState, Industry, Line, MapData, Player, PlayerId, Station, TileInfra } from './types';
+import type { City, Edge, GameState, Industry, Line, MapData, Player, PlayerId, Station, TileInfra } from './types';
 
 export class World {
   readonly map: MapData;
@@ -8,6 +8,7 @@ export class World {
   readonly grid: Grid;
   readonly industryAt = new Map<number, Industry>();
   readonly industryById = new Map<number, Industry>();
+  readonly cityById = new Map<number, City>();
   readonly hqAt = new Map<number, PlayerId>();
   readonly stationAt = new Map<number, Station>();
   readonly stationById = new Map<number, Station>();
@@ -29,6 +30,7 @@ export class World {
         for (let dx = 0; dx < ind.w; dx++) this.industryAt.set((ind.y + dy) * map.width + ind.x + dx, ind);
       }
     }
+    for (const c of map.cities) this.cityById.set(c.id, c);
     for (const p of state.players) if (p.hq !== null) this.hqAt.set(p.hq, p.id);
     for (const s of state.stations) {
       this.stationAt.set(s.tile, s);

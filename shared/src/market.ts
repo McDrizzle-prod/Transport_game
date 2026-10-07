@@ -1,5 +1,5 @@
 // Simple market: prices react to how much of each cargo is delivered compared to map-wide demand.
-import { CARGO_IDS, INDUSTRIES, MARKET, MARKET_HISTORY_LENGTH } from './config';
+import { CARGO_IDS, INDUSTRIES, MARKET, MARKET_CARGO, MARKET_HISTORY_LENGTH } from './config';
 import type { Rng } from './rng';
 import type { CargoAmounts, CargoId, Industry, MapData, MarketState, TurnReport } from './types';
 
@@ -38,7 +38,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
  * (scarcity) and drops the more of the map-wide demand is being supplied.
  */
 export function updateMarket(market: MarketState, demand: CargoAmounts, supply: CargoAmounts, rng: Rng, report: TurnReport): void {
-  for (const cargo of CARGO_IDS) {
+  for (const cargo of MARKET_CARGO) {
     const before = market.prices[cargo] ?? 1;
     const d = demand[cargo] ?? 0;
     const s = supply[cargo] ?? 0;

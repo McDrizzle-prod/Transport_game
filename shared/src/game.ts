@@ -1,5 +1,17 @@
 // Creating games, joining, placing headquarters and starting.
-import { DEFAULT_START_MONEY, MAP_SIZES, MAX_PLAYERS, MIN_HQ_DISTANCE, PLAYER_COLORS, TERRAIN } from './config';
+import {
+  CARGO_IDS,
+  DEFAULT_ACTION_SLOTS,
+  DEFAULT_START_MONEY,
+  MAP_SIZES,
+  MAX_ACTION_SLOTS,
+  MAX_PLAYERS,
+  MIN_ACTION_SLOTS,
+  MIN_HQ_DISTANCE,
+  PLAYER_COLORS,
+  TERRAIN,
+} from './config';
+import { cityPassengers } from './economy';
 import { chebyshev, tileX, tileY, validTile } from './geometry';
 import { generateWorld } from './mapgen';
 import { initialMarket } from './market';
@@ -38,6 +50,7 @@ export function normalizeSettings(input: Partial<GameSettings> | undefined, rand
     startMoney: clampInt(s.startMoney, 100_000, 100_000_000, DEFAULT_START_MONEY),
     schedule: normalizeSchedule(s.schedule),
     resolveWhenAllReady: s.resolveWhenAllReady === true,
+    actionSlots: clampInt(s.actionSlots, MIN_ACTION_SLOTS, MAX_ACTION_SLOTS, DEFAULT_ACTION_SLOTS),
   };
 }
 
@@ -55,6 +68,8 @@ export function createGame(id: string, name: string, settings: GameSettings, now
     players: [],
     industries,
     cityStats: {},
+    // Like raw industries, cities start with one turn of passengers waiting.
+    cityStock: Object.fromEntries(map.cities.map((c) => [c.id, cityPassengers(c)])),
     infra: { tiles: {}, edges: {} },
     stations: [],
     lines: [],
@@ -62,9 +77,34 @@ export function createGame(id: string, name: string, settings: GameSettings, now
     market: initialMarket(map, industries),
     alliances: [],
     invites: [],
+    auctions: [],
     nextId: 1,
   };
   return { state, map };
+}
+
+/** Fills in fields that games saved by older versions don't have yet. */
+export function migrateState(state: GameState): GameState {
+  state.alliances ??= [];
+  state.invites ??= [];
+  state.auctions ??= [];
+  state.cityStock ??= {};
+  state.settings.actionSlots ??= DEFAULT_ACTION_SLOTS;
+  for (const p of state.players) {
+    p.debt ??= 0;
+    if (p.last) {
+      p.last.tolls ??= 0;
+      p.last.dividends ??= 0;
+      p.last.interest ??= 0;
+    }
+  }
+  for (const ind of state.industries) ind.shares ??= {};
+  for (const line of state.lines) line.carries ??= 'cargo';
+  for (const c of CARGO_IDS) {
+    state.market.prices[c] ??= 1;
+    state.market.history[c] ??= [1];
+  }
+  return state;
 }
 
 export function addPlayer(
@@ -90,6 +130,7 @@ export function addPlayer(
     isHost: opts.isHost,
     joinedAt: opts.now,
     last: null,
+    debt: 0,
   };
   state.players.push(player);
   return player;

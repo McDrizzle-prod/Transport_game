@@ -161,6 +161,44 @@ describe('API', () => {
     expect((await call('GET', '/api/games/NOPE00')).status).toBe(404);
   });
 
+  it('takes loans and places bids as free actions', async () => {
+    await start();
+    const host = await call<JoinResponse>('POST', '/api/games', {
+      name: 'Beurs',
+      playerName: 'Host',
+      settings: { mapSize: 48, seed: 12, schedule: { mode: 'manual' }, actionSlots: 8 },
+    });
+    const { gameId, token } = host.data;
+    const map = (await call<MapData>('GET', `/api/games/${gameId}/map`)).data;
+    await call('POST', `/api/games/${gameId}/hq`, { tile: freeTiles(map, 1, 1)[0] }, token);
+    expect((await call('POST', `/api/games/${gameId}/loan`, { action: 'take', amount: 250_000 }, token)).status).toBe(409); // lobby
+    await call('POST', `/api/games/${gameId}/start`, {}, token);
+
+    let view = (await call<ClientView>('GET', `/api/games/${gameId}/view`, undefined, token)).data;
+    expect(view.game.settings.actionSlots).toBe(8);
+    expect(view.orders?.slots).toHaveLength(8);
+    const money = view.game.players[0].money;
+    expect((await call('POST', `/api/games/${gameId}/loan`, { action: 'take', amount: 250_000 }, token)).status).toBe(200);
+    const tooMuch = await call<{ error: string }>('POST', `/api/games/${gameId}/loan`, { action: 'take', amount: 5_000_000 }, token);
+    expect(tooMuch.data.error).toBe('loan_limit');
+    view = (await call<ClientView>('GET', `/api/games/${gameId}/view`, undefined, token)).data;
+    expect(view.game.players[0].debt).toBe(250_000);
+    expect(view.game.players[0].money).toBe(money + 250_000);
+
+    // Auctions open after turn 10.
+    for (let i = 0; i < 10; i++) await call('POST', `/api/games/${gameId}/resolve`, {}, token);
+    view = (await call<ClientView>('GET', `/api/games/${gameId}/view`, undefined, token)).data;
+    expect(view.game.turn).toBe(11);
+    const auction = view.game.auctions[0];
+    expect(auction.status).toBe('open');
+    const low = await call<{ error: string; min: number }>('POST', `/api/games/${gameId}/bid`, { auction: auction.id, amount: 1 }, token);
+    expect(low.data).toEqual({ error: 'bid_too_low', code: 'bid_too_low', min: auction.minBid });
+    expect((await call('POST', `/api/games/${gameId}/bid`, { auction: auction.id, amount: auction.minBid }, token)).status).toBe(200);
+    view = (await call<ClientView>('GET', `/api/games/${gameId}/view`, undefined, token)).data;
+    expect(view.game.auctions[0].bids).toHaveLength(1);
+    expect((await call('POST', `/api/games/${gameId}/bid`, { auction: 'x', amount: 5 }, token)).status).toBe(409);
+  });
+
   it('survives malformed requests', async () => {
     const dist = mkdtempSync(path.join(tmpdir(), 'client-dist-'));
     writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>t</title>');

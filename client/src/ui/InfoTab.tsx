@@ -1,9 +1,26 @@
 // Details of the selected tile: industry, city, station, headquarters, infrastructure, terrain.
-import { CARGO, INDUSTRIES, STATIONS, TERRAIN, TRANSPORT, TileUse, VEHICLES, VEHICLE_RESALE, coversIndustry, stationCoverage } from '@transport/shared';
+import {
+  AUCTIONS,
+  CARGO,
+  HQ_BONUS,
+  INDUSTRIES,
+  OVERSUPPLY_PRICE_FACTOR,
+  STATIONS,
+  TERRAIN,
+  TRANSPORT,
+  TileUse,
+  VEHICLES,
+  VEHICLE_RESALE,
+  cityPassengers,
+  coversIndustry,
+  highestBid,
+  majorityHolder,
+  stationCoverage,
+} from '@transport/shared';
 import type { CargoId, Station } from '@transport/shared';
 import { money, num, tileLabel } from '../format';
 import { cargoLabel } from '../i18n';
-import { useStore, useUi } from '../state/store';
+import { defaultModel, useStore, useUi } from '../state/store';
 import { CoverageList } from './ToolPanels';
 
 export function InfoTab() {
@@ -43,6 +60,11 @@ export function InfoTab() {
           <h3>🏢 Hoofdkantoor van {hqOwner.name}</h3>
           <p>
             Kapitaal: <strong>{money(hqOwner.money)}</strong>
+            {hqOwner.debt > 0 && <span className="muted"> · schuld {money(hqOwner.debt)}</span>}
+          </p>
+          <p className="small">
+            Bonus: leveringen tussen twee stations die allebei binnen {HQ_BONUS.radius} tegels van dit hoofdkantoor liggen, leveren{' '}
+            {hqOwner.name} {Math.round(HQ_BONUS.bonus * 100)}% extra op.
           </p>
         </div>
       )}
@@ -50,7 +72,7 @@ export function InfoTab() {
         <h4>Tegel {tileLabel(selection, w)}</h4>
         <p className="muted small">
           {terrain.name}
-          {map.use[selection] === TileUse.CityStreet && ' · openbare straat (vrij te gebruiken door vrachtwagens)'}
+          {map.use[selection] === TileUse.CityStreet && ' · openbare straat (vrij te gebruiken door vrachtwagens en bussen)'}
           {terrain.land !== null && ` · bouwprijs ×${terrain.land}${map.terrain[selection] === 0 ? ' (brug)' : terrain.land >= 4 ? ' (tunnel)' : ''}`}
         </p>
         {info && (
@@ -117,6 +139,35 @@ function IndustryInfo({ id }: { id: number }) {
       <p className="small muted">
         {serving.length ? `Bediend door: ${serving.map((s) => s.name).join(', ')}` : 'Nog geen stations in de buurt.'}
       </p>
+      <Shares id={id} />
+    </div>
+  );
+}
+
+function Shares({ id }: { id: number }) {
+  const store = useStore();
+  const view = useUi((s) => s.view)!;
+  const ind = view.game.industries.find((i) => i.id === id)!;
+  const owned = Object.entries(ind.shares).filter(([, n]) => n > 0);
+  const bank = AUCTIONS.sharesPerIndustry - owned.reduce((s, [, n]) => s + n, 0);
+  const holder = majorityHolder(ind);
+  const auction = view.game.auctions.find((a) => a.industry === id && a.status === 'open');
+  const top = auction ? highestBid(auction) : undefined;
+  return (
+    <div className="shares">
+      <p className="small">
+        📜 Aandelen: {owned.map(([p, n]) => `${store.playerName(p)} ${n}`).join(', ')}
+        {owned.length ? ', ' : ''}bank {bank} (van {AUCTIONS.sharesPerIndustry})
+      </p>
+      {holder && <p className="small warn">Alleen {store.playerName(holder)} en bondgenoten mogen hier laden (meerderheid van de aandelen).</p>}
+      {owned.length > 0 && !holder && (
+        <p className="small muted">Andere vervoerders betalen {Math.round(AUCTIONS.tollPerShare * 100)}% per aandeel van hun opbrengst aan de aandeelhouders.</p>
+      )}
+      {auction && (
+        <button className="link small" onClick={() => store.setTab('exchange')}>
+          🔨 Er loopt een veiling voor een aandeel{top ? ` (hoogste bod ${money(top.amount)})` : ''} →
+        </button>
+      )}
     </div>
   );
 }
@@ -127,10 +178,27 @@ function CityInfo({ id }: { id: number }) {
   const city = map.cities.find((c) => c.id === id)!;
   const got = view.game.cityStats[String(id)] ?? {};
   const prices = view.game.market.prices;
+  const waiting = view.game.cityStock[String(id)] ?? 0;
   return (
     <div className="info-block">
       <h3>🏙️ {city.name}</h3>
       <p className="small muted">{num(city.population)} inwoners</p>
+      <p className="small">
+        Een stad doet twee dingen: ze <strong>vraagt producten</strong> (tabel hieronder) en ze wil met <strong>andere steden verbonden</strong>{' '}
+        worden. Bouw een station direct naast de stad en verbind het met een station bij een andere stad.
+      </p>
+      <dl className="stats">
+        <dt>👥 Passagiers</dt>
+        <dd>
+          {cityPassengers(city)} per beurt willen naar een andere stad · {num(waiting)} wachten
+        </dd>
+        <dt>Aangekomen</dt>
+        <dd>{num(got.passengers ?? 0)} passagiers vorige beurt</dd>
+      </dl>
+      <p className="muted small">
+        Vervoer ze met 🚌 bussen, 🚄 passagierstreinen of ⛴️ veerboten. Opbrengst: {money(CARGO.passengers.price)} per passagier per tegel afstand
+        tussen de twee steden, in beide richtingen.
+      </p>
       <table className="flows">
         <thead>
           <tr>
@@ -151,7 +219,7 @@ function CityInfo({ id }: { id: number }) {
           ))}
         </tbody>
       </table>
-      <p className="small muted">Meer leveren dan gevraagd mag, maar levert maar 40% van de prijs op.</p>
+      <p className="small muted">Meer leveren dan gevraagd mag, maar levert maar {Math.round(OVERSUPPLY_PRICE_FACTOR * 100)}% van de prijs op.</p>
     </div>
   );
 }
@@ -195,7 +263,8 @@ function StationInfo({ station }: { station: Station }) {
                   <strong>
                     {l.name} <span className="muted">(lijn {l.id})</span>
                   </strong>{' '}
-                  · {vs.length}× {vs[0] ? VEHICLES[vs[0].model].icon : ''} · {l.length ? `${l.length} tegels` : 'geen verbinding!'}
+                  · {vs.length}× {vs[0] ? VEHICLES[vs[0].model].icon : l.carries === 'passengers' ? '👥' : ''} ·{' '}
+                  {l.length ? `${l.length} tegels` : 'geen verbinding!'}
                   {' · '}vorige beurt {money(l.stats.revenue)} ({l.stats.trips} ritten)
                   {mine && vs.length > 0 && (
                     <button className="link small" onClick={() => store.addAction({ type: 'sell', line: l.id, count: 1 })}>
@@ -216,7 +285,8 @@ function StationInfo({ station }: { station: Station }) {
               kind: 'vehicles',
               from: station.tile,
               to: null,
-              model: station.kind === 'road' ? 'truck' : station.kind === 'rail' ? 'train_steam' : 'barge',
+              // A station at a city (and no industry) most likely wants passengers.
+              model: defaultModel(station.kind, cov && cov.cities.length > 0 && cov.industries.length === 0 ? 'passengers' : 'cargo'),
               count: 1,
               editSlot: null,
             })

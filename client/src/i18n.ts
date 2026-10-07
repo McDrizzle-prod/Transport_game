@@ -95,12 +95,28 @@ const ERRORS: Record<string, string> = {
   no_invite: 'Er is geen voorstel (meer)',
   not_in_alliance: 'Je zit niet in een alliantie',
   invalid_request: 'Ongeldig verzoek',
-  too_long: 'Route te lang voor één actie: zet een tussenpunt dichterbij of bouw in stukken',
+  too_long: 'Te ver in één keer: kies een eindpunt dichterbij en bouw in delen',
   blocked_endpoint: 'Daar kun je niet bouwen',
+  unknown_player: 'Plaats eerst je hoofdkantoor',
+  auction_closed: 'Deze veiling is al gesloten',
+  bid_invalid: 'Ongeldig bod',
+  already_highest: 'Je hebt al het hoogste bod',
 };
 
-export function errorText(code: string): string {
-  if (/^slot_\d_invalid$/.test(code)) return `Actieslot ${code.split('_')[1]} is ongeldig`;
+export function errorText(code: string, extra: Record<string, unknown> = {}): string {
+  if (/^slot_\d+_invalid$/.test(code)) return `Actieslot ${code.split('_')[1]} is ongeldig`;
+  switch (code) {
+    case 'bid_too_low':
+      return `Bod te laag: minimaal ${money(Number(extra.min))}`;
+    case 'loan_amount':
+      return `Lenen en aflossen gaat in stappen van ${money(Number(extra.step))}`;
+    case 'loan_limit':
+      return `Kredietlimiet bereikt: je kunt maximaal ${money(Number(extra.limit))} lenen (nu ${money(Number(extra.debt))})`;
+    case 'repay_too_much':
+      return `Je schuld is maar ${money(Number(extra.debt))}`;
+    case 'insufficient_funds':
+      return extra.cost !== undefined ? `Onvoldoende geld: nodig ${money(Number(extra.cost))}, beschikbaar ${money(Number(extra.money))}` : 'Onvoldoende geld';
+  }
   return ERRORS[code] ?? code;
 }
 
@@ -115,6 +131,8 @@ export const TRANSPORT_ICON: Record<TransportKind, string> = { road: '🛣️', 
 export function actionTitle(a: Action, width: number): string {
   switch (a.type) {
     case 'build': {
+      const tile = (t: number) => `(${t % width}, ${Math.floor(t / width)})`;
+      if (a.path.length === 2) return `${TRANSPORT_ICON[a.kind]} ${transportName(a.kind)} ${tile(a.path[0])} → ${tile(a.path[1])}`;
       const extra = [a.stationStart && 'station begin', a.stationEnd && 'station eind'].filter(Boolean).join(' + ');
       return `${TRANSPORT_ICON[a.kind]} ${transportName(a.kind)} · ${num(a.path.length - 1)} stukken${extra ? ` · ${extra}` : ''}`;
     }

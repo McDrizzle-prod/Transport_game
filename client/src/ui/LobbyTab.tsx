@@ -1,5 +1,5 @@
 // Before the game starts: place headquarters, invite players, host starts the game.
-import { DEFAULT_START_MONEY } from '@transport/shared';
+import { DEFAULT_ACTION_SLOTS, DEFAULT_START_MONEY } from '@transport/shared';
 import { money } from '../format';
 import { useStore, useUi } from '../state/store';
 import { Invite, TestPlayers } from './PlayersTab';
@@ -46,6 +46,8 @@ export function LobbyTab() {
           {schedule}
           {s.resolveWhenAllReady ? ', of eerder als iedereen klaar is' : ''}
         </dd>
+        <dt>Acties per beurt</dt>
+        <dd>{s.actionSlots ?? DEFAULT_ACTION_SLOTS}</dd>
         <dt>Startkapitaal</dt>
         <dd>{money(s.startMoney ?? DEFAULT_START_MONEY)}</dd>
         <dt>Hoofdkantoren</dt>

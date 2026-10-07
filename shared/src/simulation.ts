@@ -1,6 +1,9 @@
 // Economic simulation of one turn: production, loading, driving, delivering and upkeep.
 // Vehicles move at their own speed; revenue is only earned when a vehicle arrives at the other station.
+import { majorityHolder, tollsFor } from './auctions';
 import {
+  CITY_STOCK_TURNS,
+  HQ_BONUS,
   INDUSTRIES,
   LOAD_TICKS,
   OVERSUPPLY_PRICE_FACTOR,
@@ -10,8 +13,18 @@ import {
   TRANSPORT,
   VEHICLES,
 } from './config';
-import { findConsumer, industryCenter, revenueFor, stationCoverage } from './economy';
-import type { Coverage } from './economy';
+import {
+  cargoPrice,
+  cityCenter,
+  cityPassengers,
+  findConsumer,
+  findPassengerDestination,
+  hqBonusApplies,
+  industryCenter,
+  revenueFor,
+  stationCoverage,
+} from './economy';
+import type { Consumer, Coverage } from './economy';
 import { euclid, tileX, tileY } from './geometry';
 import { findRoute, pointOnRoute } from './pathfind';
 import type { Route } from './pathfind';
@@ -61,27 +74,53 @@ export function simulateTurn(world: World, report: TurnReport, fin: Record<Playe
     line.stats = { trips: 0, revenue: 0, delivered: {} };
   }
 
-  // Each station collects the cargo that the other end of one of its active lines accepts.
-  const wants = new Map<number, Set<CargoId>>();
-  const want = (station: number, cargo: Iterable<CargoId>) => {
-    const set = wants.get(station) ?? new Set<CargoId>();
-    for (const c of cargo) set.add(c);
-    wants.set(station, set);
+  // Each station collects what the other end of one of its active lines accepts: freight for freight
+  // lines, passengers for passenger lines that lead to another city. Per cargo: the owners of those lines.
+  const wants = new Map<number, Map<CargoId, Set<PlayerId>>>();
+  const want = (station: number, cargo: CargoId, owner: PlayerId) => {
+    let perCargo = wants.get(station);
+    if (!perCargo) wants.set(station, (perCargo = new Map()));
+    const owners = perCargo.get(cargo);
+    if (owners) owners.add(owner);
+    else perCargo.set(cargo, new Set([owner]));
   };
+  const leadsToOtherCity = (from: Coverage, to: Coverage) => to.cities.some((c) => !from.cities.includes(c));
   for (const line of state.lines) {
     if (!routes.get(line.id) || !vehiclesByLine.get(line.id)?.length) continue;
     const [a, b] = line.stations;
-    want(a, coverage.get(b)?.accepts ?? []);
-    want(b, coverage.get(a)?.accepts ?? []);
+    const covA = coverage.get(a);
+    const covB = coverage.get(b);
+    if (!covA || !covB) continue;
+    if (line.carries === 'passengers') {
+      if (leadsToOtherCity(covA, covB)) want(a, 'passengers', line.owner);
+      if (leadsToOtherCity(covB, covA)) want(b, 'passengers', line.owner);
+    } else {
+      for (const c of covB.accepts) want(a, c, line.owner);
+      for (const c of covA.accepts) want(b, c, line.owner);
+    }
   }
+  // An industry whose majority shareholder decides who may load there only supplies stations of
+  // lines of that player and allies.
   const pickup = new Map<number, Station[]>();
   for (const ind of state.industries) {
     const out = INDUSTRIES[ind.type].output;
+    const holder = majorityHolder(ind);
     pickup.set(
       ind.id,
-      state.stations.filter((s) => wants.get(s.id)?.has(out) && coverage.get(s.id)!.industries.includes(ind)),
+      state.stations.filter((s) => {
+        const owners = wants.get(s.id)?.get(out);
+        if (!owners || !coverage.get(s.id)!.industries.includes(ind)) return false;
+        return !holder || [...owners].some((o) => world.canUse([holder], o));
+      }),
     );
     ind.stats = { produced: 0, shipped: 0, received: {} };
+  }
+  const cityPickup = new Map<number, Station[]>();
+  for (const city of world.map.cities) {
+    cityPickup.set(
+      city.id,
+      state.stations.filter((s) => wants.get(s.id)?.has('passengers') && coverage.get(s.id)!.cities.includes(city)),
+    );
   }
 
   const cityDelivered = new Map<number, CargoAmounts>();
@@ -126,36 +165,58 @@ export function simulateTurn(world: World, report: TurnReport, fin: Record<Playe
       ind.stock = Math.min(ind.stock + possible, ind.rate * 3);
       ind.stats.produced += possible;
     }
+    for (const city of world.map.cities) {
+      const rate = cityPassengers(city);
+      state.cityStock[city.id] = Math.min((state.cityStock[city.id] ?? 0) + tickShare(rate, t), rate * CITY_STOCK_TURNS);
+    }
+  };
+
+  /** Splits `stock` fairly over the stations (rotating who gets the remainder); returns what was handed out. */
+  const share = (stock: number, stations: Station[], cargo: CargoId, origin: number, t: number): number => {
+    const n = stations.length;
+    if (n === 0 || stock <= 0) return 0;
+    const per = Math.floor(stock / n);
+    const rem = stock % n;
+    let given = 0;
+    for (let k = 0; k < n; k++) {
+      const station = stations[(k + t) % n];
+      const room = STATION_WAITING_CAP - waitingAmount(station, cargo);
+      const amount = Math.min(per + (k < rem ? 1 : 0), room);
+      if (amount <= 0) continue;
+      addLot(station.waiting, cargo, amount, origin);
+      given += amount;
+    }
+    return given;
   };
 
   const distribute = (t: number) => {
     for (const ind of state.industries) {
-      if (ind.stock <= 0) continue;
-      const stations = pickup.get(ind.id) ?? [];
-      const n = stations.length;
-      if (n === 0) continue;
-      const cargo = INDUSTRIES[ind.type].output;
-      const per = Math.floor(ind.stock / n);
-      const rem = ind.stock % n;
-      for (let k = 0; k < n; k++) {
-        const station = stations[(k + t) % n];
-        const room = STATION_WAITING_CAP - waitingAmount(station, cargo);
-        const amount = Math.min(per + (k < rem ? 1 : 0), room);
-        if (amount <= 0) continue;
-        addLot(station.waiting, cargo, amount, ind.id);
-        ind.stock -= amount;
-        ind.stats.shipped += amount;
-      }
+      const given = share(ind.stock, pickup.get(ind.id) ?? [], INDUSTRIES[ind.type].output, ind.id, t);
+      ind.stock -= given;
+      ind.stats.shipped += given;
+    }
+    for (const city of world.map.cities) {
+      const waiting = state.cityStock[city.id] ?? 0;
+      state.cityStock[city.id] = waiting - share(waiting, cityPickup.get(city.id) ?? [], 'passengers', city.id, t);
     }
   };
 
   const load = (v: Vehicle, here: Station, there: Station) => {
-    const accepts = coverage.get(there.id)?.accepts;
-    if (!accepts) return;
+    const cov = coverage.get(there.id);
+    if (!cov) return;
+    const passengers = VEHICLES[v.model].carries === 'passengers';
     let free = VEHICLES[v.model].capacity - cargoOnBoard(v);
     for (const lot of here.waiting) {
       if (free <= 0) break;
-      if (lot.amount <= 0 || !accepts.has(lot.cargo)) continue;
+      if (lot.amount <= 0) continue;
+      if (passengers) {
+        if (lot.cargo !== 'passengers' || !cov.cities.some((c) => c.id !== lot.origin)) continue;
+      } else {
+        if (lot.cargo === 'passengers' || !cov.accepts.has(lot.cargo)) continue;
+        const ind = world.industryById.get(lot.origin);
+        const holder = ind ? majorityHolder(ind) : null;
+        if (holder && !world.canUse([holder], v.owner)) continue;
+      }
       const take = Math.min(free, lot.amount);
       lot.amount -= take;
       free -= take;
@@ -163,6 +224,14 @@ export function simulateTurn(world: World, report: TurnReport, fin: Record<Playe
     }
     here.waiting = here.waiting.filter((l) => l.amount > 0);
   };
+
+  const bonusLines = new Set(
+    state.lines.filter((l) => {
+      const a = world.stationById.get(l.stations[0]);
+      const b = world.stationById.get(l.stations[1]);
+      return !!a && !!b && hqBonusApplies(world, l.owner, [a.tile, b.tile]);
+    }).map((l) => l.id),
+  );
 
   const unload = (v: Vehicle, station: Station, line: Line, t: number) => {
     const cov = coverage.get(station.id);
@@ -174,19 +243,24 @@ export function simulateTurn(world: World, report: TurnReport, fin: Record<Playe
     const sx = tileX(world.grid, station.tile) + 0.5;
     const sy = tileY(world.grid, station.tile) + 0.5;
     for (const lot of v.cargo) {
-      const consumer = findConsumer(world, cov, station.tile, lot.cargo);
+      const isPassengers = lot.cargo === 'passengers';
+      const consumer: Consumer | null = isPassengers
+        ? findPassengerDestination(world, cov, station.tile, lot.origin)
+        : findConsumer(world, cov, station.tile, lot.cargo);
       if (!consumer) continue;
-      const origin = world.industryById.get(lot.origin);
-      const [ox, oy] = origin ? industryCenter(origin) : [consumer.x, consumer.y];
+      const originCity = isPassengers ? world.cityById.get(lot.origin) : undefined;
+      const originIndustry = isPassengers ? undefined : world.industryById.get(lot.origin);
+      const [ox, oy] = originCity ? cityCenter(originCity) : originIndustry ? industryCenter(originIndustry) : [consumer.x, consumer.y];
       const distance = euclid(ox, oy, consumer.x, consumer.y);
-      const price = state.market.prices[lot.cargo] ?? 1;
-      let revenue: number;
+      const price = cargoPrice(state, lot.cargo);
+      let gross: number;
       if (consumer.kind === 'city') {
-        const city = world.map.cities.find((c) => c.id === consumer.id)!;
+        const city = world.cityById.get(consumer.id)!;
         const got = cityDelivered.get(city.id) ?? {};
         const before = got[lot.cargo] ?? 0;
-        const full = Math.max(0, Math.min(lot.amount, (city.demand[lot.cargo] ?? 0) - before));
-        revenue =
+        // Passengers are always welcome; goods above the city's demand earn less.
+        const full = isPassengers ? lot.amount : Math.max(0, Math.min(lot.amount, (city.demand[lot.cargo] ?? 0) - before));
+        gross =
           revenueFor(lot.cargo, full, distance, price) +
           revenueFor(lot.cargo, lot.amount - full, distance, price * OVERSUPPLY_PRICE_FACTOR);
         got[lot.cargo] = before + lot.amount;
@@ -195,23 +269,41 @@ export function simulateTurn(world: World, report: TurnReport, fin: Record<Playe
         const ind = world.industryById.get(consumer.id)!;
         ind.input[lot.cargo] = Math.min((ind.input[lot.cargo] ?? 0) + lot.amount, ind.rate * 4);
         ind.stats.received[lot.cargo] = (ind.stats.received[lot.cargo] ?? 0) + lot.amount;
-        revenue = revenueFor(lot.cargo, lot.amount, distance, price);
+        gross = revenueFor(lot.cargo, lot.amount, distance, price);
       }
-      revenue = Math.round(revenue);
-      owner.money += revenue;
-      if (fin[owner.id]) fin[owner.id].revenue += revenue;
-      v.stats.revenue += revenue;
-      v.stats.revenueTotal += revenue;
-      line.stats.revenue += revenue;
+      const base = Math.round(gross);
+      const bonus = bonusLines.has(line.id) ? Math.round(base * HQ_BONUS.bonus) : 0;
+      const revenue = base + bonus;
+      // Shareholders of the industry the cargo came from get their part.
+      let toll = 0;
+      for (const { holder, part } of originIndustry ? tollsFor(originIndustry, owner.id) : []) {
+        const shareholder = state.players.find((p) => p.id === holder);
+        const amount = Math.round(revenue * part);
+        if (!shareholder || amount <= 0) continue;
+        shareholder.money += amount;
+        if (fin[holder]) fin[holder].dividends += amount;
+        toll += amount;
+      }
+      const net = revenue - toll;
+      owner.money += net;
+      if (fin[owner.id]) {
+        fin[owner.id].revenue += revenue;
+        fin[owner.id].tolls += toll;
+      }
+      v.stats.revenue += net;
+      v.stats.revenueTotal += net;
+      line.stats.revenue += net;
       line.stats.delivered[lot.cargo] = (line.stats.delivered[lot.cargo] ?? 0) + lot.amount;
       supply[lot.cargo] = (supply[lot.cargo] ?? 0) + lot.amount;
       const key = `${owner.id}:${line.id}:${lot.cargo}`;
-      const d = deliveries.get(key) ?? { player: owner.id, lineId: line.id, cargo: lot.cargo, amount: 0, revenue: 0, trips: 0 };
+      const d = deliveries.get(key) ?? { player: owner.id, lineId: line.id, cargo: lot.cargo, amount: 0, revenue: 0, bonus: 0, toll: 0, trips: 0 };
       d.amount += lot.amount;
       d.revenue += revenue;
+      d.bonus += bonus;
+      d.toll += toll;
       d.trips += 1;
       deliveries.set(key, d);
-      report.replay.events.push({ tick: t, vehicle: v.id, player: owner.id, x: sx, y: sy, cargo: lot.cargo, amount: lot.amount, revenue });
+      report.replay.events.push({ tick: t, vehicle: v.id, player: owner.id, x: sx, y: sy, cargo: lot.cargo, amount: lot.amount, revenue: net });
     }
     v.cargo = [];
   };

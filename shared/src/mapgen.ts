@@ -348,6 +348,7 @@ export function generateWorld(seed: number, size: number): GeneratedWorld {
       stock: def.inputs ? 0 : rate,
       input,
       stats: { produced: 0, shipped: 0, received: {} },
+      shares: {},
     });
   }
 
@@ -365,7 +366,8 @@ export function generateWorld(seed: number, size: number): GeneratedWorld {
   }
 
   function findIndustrySpot(def: IndustryDef): [number, number] | null {
-    for (const minGap of [4, 3, 2]) {
+    // At least 3 tiles apart, so one station (catchment 1) can't serve two industries: players have to build connections.
+    for (const minGap of [5, 4, 3]) {
       let best: [number, number] | null = null;
       let bestScore = -Infinity;
       for (let attempt = 0; attempt < 350; attempt++) {

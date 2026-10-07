@@ -128,6 +128,8 @@ export function createHttpHandler(service: GameService, clientDist: string | nul
     route('PUT', '/api/games/:id/orders', ({ params, token, body }) => service.setOrders(params.id, token, body as never)),
     route('POST', '/api/games/:id/resolve', ({ params, token }) => service.resolveNow(params.id, token)),
     route('POST', '/api/games/:id/alliance', ({ params, token, body }) => service.alliance(params.id, token, body as never)),
+    route('POST', '/api/games/:id/loan', ({ params, token, body }) => service.loan(params.id, token, body as never)),
+    route('POST', '/api/games/:id/bid', ({ params, token, body }) => service.bid(params.id, token, body as never)),
   ];
 
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {

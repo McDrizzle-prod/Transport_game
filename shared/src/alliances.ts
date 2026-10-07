@@ -55,10 +55,3 @@ export function leaveAlliance(state: GameState, player: PlayerId): Msg | null {
   state.invites = state.invites.filter((i) => i.from !== player);
   return null;
 }
-
-/** Fills in fields that games saved by older versions don't have yet. */
-export function migrateState(state: GameState): GameState {
-  state.alliances ??= [];
-  state.invites ??= [];
-  return state;
-}

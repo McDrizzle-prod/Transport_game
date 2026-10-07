@@ -5,13 +5,14 @@ Alle getallen hieronder komen uit [`shared/src/config.ts`](../shared/src/config.
 ## Doel
 
 Bouw het meest winstgevende transportbedrijf. Verbind industrieën met elkaar en met steden, zodat grondstoffen
-fabrieken bereiken en producten de steden. (Een eindvoorwaarde, met schulden en aandelen, staat op de
-[roadmap](ROADMAP.md).)
+fabrieken bereiken en producten de steden, en verbind steden met elkaar voor passagiers. (Een eindvoorwaarde, met
+schulden en aandelen van bedrijven, staat op de [roadmap](ROADMAP.md).)
 
 ## Opzet
 
-- De host maakt een spel: kaartgrootte (48, 64 of 96 tegels in het vierkant), maximaal aantal spelers,
-  startkapitaal (standaard **€ 1.500.000**) en het moment van uitvoeren.
+- De host maakt een spel: kaartgrootte (48, 64 of 96 tegels in het vierkant), maximaal aantal spelers, het aantal
+  **acties per beurt** (standaard 5, van 3 tot 20), startkapitaal (standaard **€ 1.500.000**) en het moment van
+  uitvoeren.
 - Iedere speler plaatst een **hoofdkantoor** op een vrije tegel, minstens **6 tegels** (in beide richtingen) van
   andere hoofdkantoren. Daarna start de host het spel. Wie later instapt, plaatst zijn hoofdkantoor bij binnenkomst.
 
@@ -22,32 +23,40 @@ fabrieken bereiken en producten de steden. (Een eindvoorwaarde, met schulden en 
 - Tot dat moment plan je je acties en kun je ze aanpassen; ze worden direct op de server bewaard. De acties van
   anderen zie je pas na de uitvoering.
 
-## De 5 actieslots
+## Acties en actieslots
 
-Je hebt per beurt 5 slots. Bij de uitvoering gaat **slot 1 van alle spelers tegelijk**, dan slot 2, tot en met
-slot 5. Binnen één slot worden eerst alle bouwacties uitgevoerd en daarna de voertuig-acties. De volgorde is dus
-belangrijk:
+Je hebt per beurt een vast aantal actieslots (standaard 5). Bij de uitvoering gaat **slot 1 van alle spelers
+tegelijk**, dan slot 2, enzovoort. Binnen één slot worden eerst alle bouwacties uitgevoerd en daarna de
+voertuig-acties. De volgorde is dus belangrijk:
 
-- Bouw eerst je weg met stations (slot 1) en zet daarna voertuigen in (slot 2). Andersom mislukt het kopen van de
-  voertuigen, omdat de stations dan nog niet bestaan.
+- Bouw eerst je weg en stations en zet daarna voertuigen in. Andersom mislukt het kopen van de voertuigen, omdat de
+  stations dan nog niet bestaan of nog niet verbonden zijn.
 - Zet bouwacties waar je concurrentie verwacht zo vroeg mogelijk (zie Conflicten).
 
-### Acties
+### Wat kost een actie
 
-| Actie | Wat het doet |
-| --- | --- |
-| **Weg / spoor / kanaal aanleggen** | Een route van maximaal 64 stukken. Tik begin, eventuele tussenpunten en eind; de planner kiest de goedkoopste route en hergebruikt je eigen netwerk gratis. Optioneel een station aan het begin en/of eind. |
-| **Station bouwen** | Vrachtstation, treinstation of haven op een losse tegel. |
-| **Voertuigen inzetten** | 1–5 voertuigen tussen twee stations van jou (of een bondgenoot) die via je netwerk verbonden zijn. Ze vormen samen een lijn. |
-| **Voertuigen verkopen** | Verkoop voertuigen van een lijn voor 50% van de nieuwprijs (via de info van een station). |
+| Actie | Kost | Wat het doet |
+| --- | --- | --- |
+| **Een stuk weg / spoor / kanaal** | 1 actie per stuk | Eén stuk van een tegel naar een aangrenzende tegel (ook schuin). Een route van 8 stukken kost dus 8 acties. Stukken die al bestaan (je eigen netwerk, stadsstraten, open water) kosten niets. |
+| **Station bouwen** | 1 actie | Wegstation, treinstation of haven. |
+| **Voertuigen inzetten** | 1 actie | 1–5 voertuigen tussen twee stations van jou (of een bondgenoot) die via je netwerk verbonden zijn. Ze vormen samen een lijn. |
+| **Voertuigen verkopen** | 1 actie | Verkoop voertuigen van een lijn voor 50% van de nieuwprijs (via de info van een station). |
+| **Lenen / aflossen / bieden** | geen actie | Gaat direct in, via het tabblad Beurs. |
+
+**Zo plan je een route:** kies Weg, Spoor of Kanaal, tik op het begin en daarna op het eind. De planner kiest de
+goedkoopste route en zet elk stuk dat gebouwd moet worden direct in je vrije actieslots (vink vooraf aan of je aan
+het begin en/of eind een station wilt; elk station is een extra actie). Daarna ben je terug in de gewone
+kaartweergave. Past de route niet helemaal, dan worden de eerste stukken gepland; de rest bouw je volgende beurt
+verder vanaf het eind. In de lijst met acties staat een route als één regel (bijv. "slot 2–9"), die je kunt
+openklappen of in één keer kunt verwijderen.
 
 ## Conflicten
 
 Bouwen gebeurt per **tegel**. Wie een vrije tegel claimt, wordt eigenaar; op een tegel van een ander kun je niet
 bouwen.
 
-- **Verschillende slots**: de speler met het **laagste slot** krijgt de tegel. De ander bouwt de rest van zijn
-  route, maar niet over die tegel (en betaalt alleen wat gebouwd is). In het rapport staat bijvoorbeeld:
+- **Verschillende slots**: de speler met het **laagste slot** krijgt de tegel. Het stuk van de ander dat over die
+  tegel gaat, mislukt (en kost niets). In het rapport staat bijvoorbeeld:
   *"✖ Tegel (21, 9) al van Konkurrent BV (beurt 1, slot 1)"*.
 - **Zelfde slot**: beide spelers krijgen de tegel. Ieder legt er zijn eigen weg of spoor; de tegel is gedeeld
   en beiden kunnen hem gebruiken. Leggen ze precies hetzelfde stuk, dan is dat stuk van allebei.
@@ -57,6 +66,8 @@ bouwen.
 - Kruisingen met je **eigen** netwerk mogen wel: je weg kan je eigen spoor kruisen (overweg) en routes van
   hetzelfde type vormen een splitsing.
 - Allianties veranderen niets aan de conflictregels.
+
+Omdat elk stuk een eigen slot heeft, telt per tegel het slot van het stuk dat de tegel als eerste claimt.
 
 ## Netwerk, terrein en kosten
 
@@ -71,7 +82,7 @@ Kosten per stuk op vlak gras (een schuin stuk kost √2 ≈ 1,41 keer zoveel):
 Terreinfactor: zand ×1,2 · bos ×1,5 · heuvels ×2,2 · bergen ×4 (tunnel, niet voor kanalen) · water ×6 (brug).
 Kanalen over open water zijn gratis: schepen varen daar al.
 
-- **Stadsstraten** zijn openbaar: vrachtwagens van iedereen mogen erover rijden.
+- **Stadsstraten** zijn openbaar: vrachtwagens en bussen van iedereen mogen erover rijden.
 - **Schepen** varen vrij over open water; kanalen (van jou of een bondgenoot) verbinden water over land.
 - Bruggen hinderen schepen niet.
 
@@ -79,12 +90,14 @@ Kanalen over open water zijn gratis: schepen varen daar al.
 
 | Station | Kosten | Onderhoud | Bereik |
 | --- | --- | --- | --- |
-| 🚏 Vrachtstation | € 30.000 | € 1.000 | 2 tegels |
-| 🚉 Treinstation | € 90.000 | € 3.000 | 3 tegels |
-| ⚓ Haven | € 100.000 | € 3.000 | 3 tegels, moet aan water liggen |
+| 🚏 Wegstation | € 30.000 | € 1.000 | 1 tegel |
+| 🚉 Treinstation | € 90.000 | € 3.000 | 1 tegel |
+| ⚓ Haven | € 100.000 | € 3.000 | 2 tegels, moet aan water liggen |
 
-Een station bedient alle industrieën en steden waarvan een tegel binnen het bereik ligt (vierkant rond het
-station). Stations zijn van de bouwer; gedeelde stations van allebei.
+Een station bedient alleen de industrieën en steden waarvan een tegel **direct naast** het station ligt (binnen
+het bereik, in een vierkant rond het station). Tussen twee industrieën liggen altijd minstens 2 tegels, dus één
+station kan nooit twee industrieën tegelijk bedienen: je moet echt een verbinding bouwen. Stations zijn van de bouwer;
+gedeelde stations van allebei.
 
 ## Productieketens
 
@@ -105,59 +118,108 @@ station). Stations zijn van de bouwer; gedeelde stations van allebei.
 | Goederenfabriek | 📦 Goederen | Staal + Planken |
 
 Fabrieken verwerken maximaal 120 eenheden per beurt en produceren alleen als ze grondstoffen krijgen. Wat ze maken
-kan door iedereen met een station in de buurt worden opgehaald.
-
-**Steden** vragen altijd voedsel en daarnaast 2–3 van: goederen, brandstof, gereedschap, bouwmaterialen. Hoeveel
-ze per beurt willen hangt af van het aantal inwoners. Lever je meer dan de vraag, dan krijg je voor het meerdere
-maar 40% van de prijs.
+kan door iedereen met een station ernaast worden opgehaald (tenzij iemand de meerderheid van de aandelen heeft,
+zie Beurs).
 
 Liggen er meerdere stations met actieve lijnen bij één industrie, dan wordt de productie eerlijk over die stations
 verdeeld.
+
+## Steden
+
+Steden hebben twee rollen (op de kaart staan ze onder de naam: de gevraagde producten en het aantal passagiers):
+
+1. **Ze vragen producten**: altijd voedsel en daarnaast 2–3 van: goederen, brandstof, gereedschap,
+   bouwmaterialen. Hoeveel ze per beurt willen hangt af van het aantal inwoners. Lever je meer dan de vraag, dan
+   krijg je voor het meerdere maar 40% van de prijs.
+2. **Ze willen met andere steden verbonden worden**: per 40 inwoners wil elke beurt 1 passagier naar een andere
+   stad (een stad van 2.000 inwoners: 50 passagiers per beurt). Wachtende passagiers stapelen op tot 3 beurten.
+   Vervoer ze met een 🚌 bus, 🚄 passagierstrein of ⛴️ veerboot tussen een station bij de ene stad en een station bij
+   een andere stad. Passagiers reizen in beide richtingen en leveren **€ 16 per passagier per tegel** afstand
+   tussen de twee steden op (een vaste prijs, los van de markt).
+
+Vrachtvoertuigen vervoeren geen passagiers en passagiersvoertuigen geen vracht; een vrachtlijn en een
+passagierslijn tussen dezelfde stations zijn aparte lijnen.
 
 ## Voertuigen
 
 | Voertuig | Lading | Snelheid (tegels per beurt) | Prijs | Onderhoud per beurt |
 | --- | --- | --- | --- | --- |
-| 🚚 Vrachtwagen | 20 | 40 | € 45.000 | € 4.000 |
-| 🚛 Zware vrachtwagen | 32 | 32 | € 75.000 | € 6.000 |
-| 🚂 Stoomtrein | 90 | 56 | € 220.000 | € 15.000 |
-| 🚆 Dieseltrein | 140 | 88 | € 380.000 | € 24.000 |
-| 🛥️ Binnenvaartschip | 150 | 22 | € 140.000 | € 9.000 |
-| 🚢 Vrachtschip | 280 | 30 | € 260.000 | € 16.000 |
+| 🚚 Vrachtwagen | 20 ton | 40 | € 45.000 | € 4.000 |
+| 🚛 Zware vrachtwagen | 32 ton | 32 | € 75.000 | € 6.000 |
+| 🚌 Bus | 25 passagiers | 44 | € 50.000 | € 4.000 |
+| 🚂 Stoomtrein | 90 ton | 56 | € 220.000 | € 15.000 |
+| 🚆 Dieseltrein | 140 ton | 88 | € 380.000 | € 24.000 |
+| 🚄 Passagierstrein | 120 passagiers | 80 | € 280.000 | € 18.000 |
+| 🛥️ Binnenvaartschip | 150 ton | 22 | € 140.000 | € 9.000 |
+| 🚢 Vrachtschip | 280 ton | 30 | € 260.000 | € 16.000 |
+| ⛴️ Veerboot | 120 passagiers | 30 | € 140.000 | € 9.000 |
 
 Een beurt wordt in 40 stappen gesimuleerd. Een voertuig laadt bij het ene station wat het andere station accepteert,
 rijdt met zijn eigen snelheid en levert af bij aankomst. Daarna laadt het voor de terugweg (als er iets terug te
 vervoeren valt). Voertuigen zijn aan het eind van een beurt gewoon onderweg en rijden de volgende beurt verder.
 Meerdere voertuigen op één lijn vertrekken gespreid.
 
+Kies je bij het inzetten eerst een station, dan past het soort voertuig zich aan (bijv. treinstation → trein). Een
+tik naast een station kiest dat station ook.
+
 ## Opbrengst
 
 Bij aflevering krijgt de eigenaar van het voertuig:
 
 ```
-opbrengst = hoeveelheid × basisprijs × marktprijs × afstand
+opbrengst = hoeveelheid × basisprijs × marktprijs × afstand  (+ 25% hoofdkantoorbonus)  (− tol aan aandeelhouders)
 ```
 
-- **afstand** = hemelsbrede afstand in tegels tussen het midden van de industrie waar de vracht vandaan kwam en het
-  midden van de bestemming (industrie of stad). Een omweg levert dus niets extra op, een lange verbinding wel.
-- **basisprijs** per ton per tegel: grondstoffen € 28–36, producten € 48–85 (zie het tabblad Markt).
+- **afstand** = hemelsbrede afstand in tegels tussen het midden van de industrie waar de vracht vandaan kwam (bij
+  passagiers: de stad van vertrek) en het midden van de bestemming (industrie of stad). Een omweg levert dus niets
+  extra op, een lange verbinding wel.
+- **basisprijs** per ton per tegel: grondstoffen € 28–36, producten € 48–85 (zie het tabblad Markt), passagiers € 16.
 - Voorbeeld: 20 ton graan (€ 32) over 22 tegels bij marktprijs ×1,00 = 20 × 32 × 22 = **€ 14.080**.
 
 Het spel toont deze berekening vooraf bij het inzetten van voertuigen: verwachte vracht per beurt, opbrengst,
-onderhoud, netto per beurt en terugverdientijd.
+onderhoud, netto per beurt en terugverdientijd (inclusief bonus en tol).
+
+## Hoofdkantoor
+
+Om je activiteiten (eerst) in één deel van de kaart te concentreren: leveringen op een lijn waarvan **beide
+stations binnen 10 tegels** (in beide richtingen) van je hoofdkantoor liggen, leveren **25% extra** op. Het
+bonusgebied staat als gestippeld vierkant om je hoofdkantoor op de kaart.
 
 ## Markt
 
 Elke goedsoort heeft een marktprijs (×0,50 tot ×1,60, start ×1,00). Na elke beurt beweegt die richting een
 doelprijs: `1,30 − 0,55 × (geleverd op de hele kaart / vraag op de hele kaart)`. Wordt een goed weinig geleverd,
 dan stijgt de prijs; leveren veel spelers hetzelfde, dan daalt hij. Per beurt wordt 35% van het verschil
-overbrugd, met een kleine willekeurige schommeling.
+overbrugd, met een kleine willekeurige schommeling. Passagiers hebben een vaste prijs.
 
 ## Kosten en geld
 
 Na de simulatie betaal je onderhoud voor voertuigen, stations en infrastructuur (gedeelde infrastructuur betaal je
-samen). Je saldo kan negatief worden; dan mislukken bouw- en koopacties tot je weer geld hebt. Verkoop dan
-voertuigen of wacht op opbrengsten. (Leningen en aandelen staan op de roadmap.)
+samen) en rente over je leningen. Je saldo kan negatief worden; dan mislukken bouw- en koopacties tot je weer geld
+hebt. Leen dan bij, verkoop voertuigen of wacht op opbrengsten.
+
+## Beurs (vrije acties)
+
+### Leningen
+
+- Lenen en aflossen in stappen van **€ 250.000**, op elk moment (kost geen actie en gaat direct in).
+- Rente: **2% per beurt** over je schuld, aan het eind van elke beurt.
+- Kredietlimiet: **€ 500.000 + 50% van de boekwaarde** van je bezit. De boekwaarde is 50% van wat je voertuigen,
+  stations en infrastructuur hebben gekost.
+
+### Veilingen van aandelen in industrieën
+
+- Elke industrie heeft **10 aandelen** van 10%, aanvankelijk allemaal van de bank.
+- **Na beurt 10** komen er elke beurt aandelen van **3 willekeurige industrieën** in de veiling (één aandeel per
+  industrie). De startprijs hangt af van wat de industrie produceert.
+- Bieden kost geen actie. Een nieuw bod moet minstens **5% hoger** zijn dan het hoogste bod. Het geld van het
+  hoogste bod wordt direct gereserveerd; wie wordt overboden, krijgt zijn geld meteen terug.
+- **Een bod moet een hele beurt het hoogste blijven**: een bod uit beurt T wint aan het eind van beurt T+1 als
+  niemand meer heeft geboden. Zo heeft iedereen minstens één volledige beurt om te reageren.
+- Een veiling zonder bod vervalt na 3 beurten; het aandeel blijft dan bij de bank (en kan later terugkomen).
+- **Wat een aandeel oplevert**: per aandeel krijg je **3%** van de opbrengst die *andere* spelers maken met vracht
+  van die industrie (zij dragen dat af; met 2 aandelen dus 6%).
+- **Meerderheid (6 of meer aandelen)**: alleen jij en je bondgenoten mogen nog vracht laden bij die industrie.
 
 ## Allianties
 

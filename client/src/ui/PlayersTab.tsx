@@ -66,6 +66,7 @@ export function PlayersTab() {
               </div>
               <div className="player-money">
                 <strong>{money(p.money)}</strong>
+                {(p.debt ?? 0) > 0 && <span className="small muted">schuld {money(p.debt)}</span>}
                 {net !== null && <span className={`small ${net >= 0 ? 'pos' : 'neg'}`}>{signedMoney(net)}</span>}
               </div>
             </li>

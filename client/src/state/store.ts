@@ -1,6 +1,18 @@
 // Client state for one game: server view, the player's draft orders, tools and selection.
 import { createContext, useContext, useSyncExternalStore } from 'react';
-import { ACTION_SLOTS, World, emptySlots, hqError, planRoute, previewOrders } from '@transport/shared';
+import {
+  DEFAULT_ACTION_SLOTS,
+  STATIONS,
+  TRANSPORT,
+  VEHICLES,
+  World,
+  chebyshev,
+  checkStationTile,
+  emptySlots,
+  hqError,
+  planRoute,
+  previewOrders,
+} from '@transport/shared';
 import type {
   Action,
   ClientView,
@@ -9,22 +21,25 @@ import type {
   OrdersPreview,
   Player,
   RoutePlan,
+  Station,
   StationKind,
   TransportKind,
   TurnReport,
   VehicleModelId,
 } from '@transport/shared';
 import { ApiError, api, connectGame } from '../api';
-import { errorText } from '../i18n';
+import { money } from '../format';
+import { errorText, msgText } from '../i18n';
 import { activeIdentity } from '../identity';
 import type { Identity } from '../identity';
 
-export type Tab = 'actions' | 'info' | 'report' | 'market' | 'players' | 'help';
+export type Tab = 'actions' | 'info' | 'report' | 'market' | 'exchange' | 'players' | 'help';
 
 export type ToolState =
   | { kind: 'inspect' }
   | { kind: 'hq' }
-  | { kind: 'route'; transport: TransportKind; waypoints: number[]; stationStart: boolean; stationEnd: boolean; editSlot: number | null }
+  /** Tap the start, then the end: the route goes into the free slots (one action per segment) and the tool closes. */
+  | { kind: 'route'; transport: TransportKind; start: number | null; stationStart: boolean; stationEnd: boolean }
   | { kind: 'station'; station: StationKind; tile: number | null; editSlot: number | null }
   | { kind: 'vehicles'; from: number | null; to: number | null; model: VehicleModelId; count: number; editSlot: number | null };
 
@@ -88,7 +103,7 @@ export class GameStore {
       view: null,
       clockOffset: 0,
       report: null,
-      draft: emptySlots(),
+      draft: emptySlots(DEFAULT_ACTION_SLOTS),
       ready: false,
       sync: 'saved',
       tool: { kind: 'inspect' },
@@ -220,11 +235,27 @@ export class GameStore {
     return this.memoPreview.value;
   }
 
+  /** Number of action slots per turn in this game. */
+  slotCount(): number {
+    return this.state.view?.game.settings.actionSlots ?? DEFAULT_ACTION_SLOTS;
+  }
+
+  /** Empty slots in the order new actions fill them: after the last planned action first, then earlier gaps. */
+  freeSlots(): number[] {
+    const { draft } = this.state;
+    let last = -1;
+    draft.forEach((a, i) => {
+      if (a) last = i;
+    });
+    const free = draft.map((a, i) => (a ? -1 : i)).filter((i) => i >= 0);
+    return [...free.filter((i) => i > last), ...free.filter((i) => i < last)];
+  }
+
   /** Slot a new action from the active tool goes to (0-based), or -1 when all are full. */
   targetSlot(): number {
     const tool = this.state.tool;
     if ('editSlot' in tool && tool.editSlot !== null) return tool.editSlot;
-    return this.state.draft.findIndex((s) => s === null);
+    return this.freeSlots()[0] ?? -1;
   }
 
   /** The world as it will be right before the target slot executes (earlier planned actions included). */
@@ -233,7 +264,7 @@ export class GameStore {
     const me = view?.you?.playerId;
     if (!map || !view || !me) return null;
     const slot = this.targetSlot();
-    const upTo = slot < 0 ? ACTION_SLOTS : slot;
+    const upTo = slot < 0 ? draft.length : slot;
     const slots = draft.map((a, i) => (i < upTo ? a : null));
     const key = [map, view.game, ...slots];
     const cached = this.memoPlanning.get(upTo);
@@ -243,25 +274,44 @@ export class GameStore {
     return value;
   }
 
-  /** Route through the waypoints of the route tool (plus an optional hover tile). */
-  routePlan(extra: number | null = null): RoutePlan | null {
+  /** Route of the route tool from its start to `end` (the hovered or tapped tile). */
+  routePlan(end: number | null): RoutePlan | null {
     const tool = this.state.tool;
     const me = this.state.view?.you?.playerId;
-    if (tool.kind !== 'route' || !me) return null;
-    const points = extra !== null && tool.waypoints[tool.waypoints.length - 1] !== extra ? [...tool.waypoints, extra] : tool.waypoints;
-    if (points.length < 2) return null;
+    if (tool.kind !== 'route' || !me || tool.start === null || end === null || end === tool.start) return null;
     const world = this.planningWorld();
     if (!world) return null;
     let worldId = this.worldIds.get(world);
     if (worldId === undefined) this.worldIds.set(world, (worldId = ++this.seq));
-    const key = `${worldId}|${tool.transport}|${points.join(',')}`;
+    const key = `${worldId}|${tool.transport}|${tool.start},${end}`;
     let plan = this.routeCache.get(key);
     if (!plan) {
-      plan = planRoute(world, me, tool.transport, points);
+      plan = planRoute(world, me, tool.transport, [tool.start, end]);
       if (this.routeCache.size > 24) this.routeCache.delete(this.routeCache.keys().next().value!);
       this.routeCache.set(key, plan);
     }
     return plan;
+  }
+
+  /** The actions a planned route becomes: one per segment that needs building, plus the chosen stations. */
+  routeActions(plan: RoutePlan): Action[] {
+    const tool = this.state.tool;
+    const world = this.planningWorld();
+    const me = this.state.view?.you?.playerId;
+    if (tool.kind !== 'route' || !plan.path || !plan.plan || !world || !me) return [];
+    const actions: Action[] = plan.plan.edges.map((e) => ({ type: 'build', kind: e.kind, path: [e.a, e.b] }));
+    const station = TRANSPORT[tool.transport].station;
+    if (station) {
+      // Only where a new station can stand (not on a street, not where one exists already).
+      const possible = (t: number) => {
+        const check = checkStationTile(world, me, station, t);
+        return check.ok && !check.exists;
+      };
+      const [first, last] = [plan.path[0], plan.path[plan.path.length - 1]];
+      if (tool.stationStart && possible(first)) actions.unshift({ type: 'station', kind: station, tile: first });
+      if (tool.stationEnd && possible(last)) actions.push({ type: 'station', kind: station, tile: last });
+    }
+    return actions;
   }
 
   serverNow(): number {
@@ -279,7 +329,7 @@ export class GameStore {
   addAction(action: Action): boolean {
     const slot = this.targetSlot();
     if (slot < 0) {
-      this.toast('Alle 5 actieslots zijn gevuld. Verwijder eerst een actie.', 'error');
+      this.toast(`Alle ${this.slotCount()} actieslots zijn gevuld. Verwijder eerst een actie.`, 'error');
       return false;
     }
     const draft = [...this.state.draft];
@@ -288,6 +338,29 @@ export class GameStore {
     this.set({ tool: { kind: 'inspect' }, tab: 'actions', highlightSlot: slot });
     this.toast(`Actie in slot ${slot + 1} gezet`, 'ok');
     return true;
+  }
+
+  /** Puts actions in the free slots (in order). Returns the slots used; actions that don't fit are dropped. */
+  addActions(actions: Action[]): number[] {
+    const free = this.freeSlots();
+    const used = free.slice(0, actions.length);
+    if (used.length === 0) return used;
+    const draft = [...this.state.draft];
+    used.forEach((slot, k) => (draft[slot] = actions[k]));
+    this.setDraft(draft);
+    this.set({ highlightSlot: null });
+    return used;
+  }
+
+  clearSlots(): void {
+    this.setDraft(this.state.draft.map(() => null));
+    this.set({ highlightSlot: null });
+  }
+
+  /** Removes the actions in slots from..to (inclusive), e.g. a whole route. */
+  removeSlots(from: number, to: number): void {
+    this.setDraft(this.state.draft.map((a, i) => (i >= from && i <= to ? null : a)));
+    this.set({ highlightSlot: null });
   }
 
   removeSlot(i: number): void {
@@ -299,7 +372,7 @@ export class GameStore {
 
   moveSlot(i: number, delta: -1 | 1): void {
     const j = i + delta;
-    if (j < 0 || j >= ACTION_SLOTS) return;
+    if (j < 0 || j >= this.state.draft.length) return;
     const draft = [...this.state.draft];
     [draft[i], draft[j]] = [draft[j], draft[i]];
     this.setDraft(draft);
@@ -329,16 +402,7 @@ export class GameStore {
   editSlot(i: number): void {
     const a = this.state.draft[i];
     if (!a) return;
-    if (a.type === 'build') {
-      this.setTool({
-        kind: 'route',
-        transport: a.kind,
-        waypoints: [a.path[0], a.path[a.path.length - 1]],
-        stationStart: !!a.stationStart,
-        stationEnd: !!a.stationEnd,
-        editSlot: i,
-      });
-    } else if (a.type === 'station') {
+    if (a.type === 'station') {
       this.setTool({ kind: 'station', station: a.kind, tile: a.tile, editSlot: i });
     } else if (a.type === 'vehicles') {
       this.setTool({ kind: 'vehicles', from: a.from, to: a.to, model: a.model, count: a.count, editSlot: i });
@@ -374,38 +438,95 @@ export class GameStore {
         void this.placeHq(tile);
         return;
       case 'route': {
-        if (tool.waypoints[tool.waypoints.length - 1] === tile) return;
-        if (tool.waypoints.length === 0) {
-          this.set({ tool: { ...tool, waypoints: [tile] } });
+        if (tool.start === null) {
+          this.set({ tool: { ...tool, start: tile } });
           return;
         }
-        const plan = this.routePlan(tile);
-        if (!plan?.path || plan.error) {
-          this.toast(errorText(plan?.error ?? 'unreachable'), 'error');
-          return;
-        }
-        this.set({ tool: { ...tool, waypoints: [...tool.waypoints, tile] } });
+        if (tile === tool.start) return;
+        this.placeRoute(tile);
         return;
       }
       case 'station':
         this.set({ tool: { ...tool, tile } });
         return;
       case 'vehicles': {
-        const world = this.planningWorld();
-        const station = world?.stationAt.get(tile);
-        const me = this.state.view?.you?.playerId;
-        if (!station || !me || !world?.canUse(station.owners, me)) {
+        const pickingFrom = tool.from === null || tool.to !== null;
+        const kind = pickingFrom ? null : VEHICLES[tool.model].kind;
+        const station = this.stationNear(tile, kind ?? VEHICLES[tool.model].kind, !pickingFrom);
+        if (!station) {
           this.toast('Tik op een station van jou of een bondgenoot (geplande stations tellen ook).', 'info');
           return;
         }
-        if (tool.from === null || (tool.from !== null && tool.to !== null)) {
-          this.set({ tool: { ...tool, from: tile, to: null } });
-        } else if (tile !== tool.from) {
-          this.set({ tool: { ...tool, to: tile } });
+        if (pickingFrom) {
+          // The first station decides the kind of vehicle: switch to a matching model when needed.
+          const model = VEHICLES[tool.model].kind === station.kind ? tool.model : defaultModel(station.kind, VEHICLES[tool.model].carries);
+          this.set({ tool: { ...tool, model, from: station.tile, to: null } });
+        } else if (station.kind !== VEHICLES[tool.model].kind) {
+          this.toast(`Kies een ${STATIONS[VEHICLES[tool.model].kind].name.toLowerCase()}: een lijn verbindt twee stations van hetzelfde soort.`, 'error');
+        } else if (station.tile !== tool.from) {
+          this.set({ tool: { ...tool, to: station.tile } });
         }
         return;
       }
     }
+  }
+
+  /**
+   * A usable station on or right next to the tapped tile (station badges are bigger than their tile when
+   * zoomed out). Prefers the tapped tile, then stations of `kind`, then the closest.
+   */
+  stationNear(tile: number, kind: StationKind, sameKindOnly: boolean): Station | null {
+    const world = this.planningWorld();
+    const me = this.state.view?.you?.playerId;
+    if (!world || !me) return null;
+    const w = world.grid.width;
+    const x = tile % w;
+    const y = Math.floor(tile / w);
+    let best: Station | null = null;
+    let bestScore = Infinity;
+    for (const st of world.state.stations) {
+      const d = chebyshev(x, y, st.tile % w, Math.floor(st.tile / w));
+      if (d > 1 || !world.canUse(st.owners, me) || (sameKindOnly && st.kind !== kind)) continue;
+      const score = d * 10 + (st.kind === kind ? 0 : 5) + Math.hypot(x - (st.tile % w), y - Math.floor(st.tile / w));
+      if (score < bestScore) {
+        bestScore = score;
+        best = st;
+      }
+    }
+    return best;
+  }
+
+  /** Second tap of the route tool: plan the route and put it in the free slots, one action per segment. */
+  private placeRoute(end: number): void {
+    const tool = this.state.tool;
+    if (tool.kind !== 'route') return;
+    const plan = this.routePlan(end);
+    if (!plan?.path || plan.error || !plan.plan || plan.plan.fatal) {
+      this.toast(plan?.plan?.fatal ? msgText(plan.plan.fatal) : errorText(plan?.error ?? 'unreachable'), 'error');
+      return;
+    }
+    const actions = this.routeActions(plan);
+    if (actions.length === 0) {
+      this.toast('Deze verbinding bestaat al: er hoeft niets gebouwd te worden.', 'info');
+      this.set({ tool: { kind: 'inspect' } });
+      return;
+    }
+    const used = this.addActions(actions);
+    if (used.length === 0) {
+      this.toast(`Alle ${this.slotCount()} actieslots zijn gevuld. Verwijder eerst een actie.`, 'error');
+      return;
+    }
+    const name = TRANSPORT[tool.transport].name;
+    const slots = used.length === 1 ? `slot ${used[0] + 1}` : `slots ${Math.min(...used) + 1}–${Math.max(...used) + 1}`;
+    if (used.length < actions.length) {
+      this.toast(
+        `${name}: ${used.length} van de ${actions.length} acties gepland (${slots}). De rest past niet meer in deze beurt; plan die volgende beurt vanaf het eind.`,
+        'info',
+      );
+    } else {
+      this.toast(`${name} gepland: ${actions.length} actie${actions.length > 1 ? 's' : ''} in ${slots}.`, 'ok');
+    }
+    this.set({ tool: { kind: 'inspect' }, tab: 'actions', sheetOpen: true });
   }
 
   select(tile: number | null): void {
@@ -500,6 +621,30 @@ export class GameStore {
     }
   }
 
+  async loan(action: 'take' | 'repay', amount: number): Promise<void> {
+    const { identity, gameId } = this.state;
+    if (!identity) return;
+    try {
+      await api.loan(gameId, identity.token, action, amount);
+      this.toast(action === 'take' ? `${money(amount)} geleend` : `${money(amount)} afgelost`, 'ok');
+    } catch (err) {
+      this.toast(errorText(err instanceof ApiError ? err.code : 'network', err instanceof ApiError ? err.extra : {}), 'error');
+    }
+  }
+
+  async bid(auction: number, amount: number): Promise<boolean> {
+    const { identity, gameId } = this.state;
+    if (!identity) return false;
+    try {
+      await api.bid(gameId, identity.token, auction, amount);
+      this.toast(`Bod van ${money(amount)} geplaatst; het geld staat gereserveerd tot iemand hoger biedt.`, 'ok');
+      return true;
+    } catch (err) {
+      this.toast(errorText(err instanceof ApiError ? err.code : 'network', err instanceof ApiError ? err.extra : {}), 'error');
+      return false;
+    }
+  }
+
   async resolveNow(): Promise<void> {
     const { identity, gameId } = this.state;
     if (!identity) return;
@@ -510,6 +655,12 @@ export class GameStore {
       this.toast(errorText(err instanceof ApiError ? err.code : 'network'), 'error');
     }
   }
+}
+
+/** A vehicle model for a station kind, preferably one that carries the same (freight or passengers). */
+export function defaultModel(kind: StationKind, carries: 'cargo' | 'passengers' = 'cargo'): VehicleModelId {
+  const models = Object.values(VEHICLES).filter((m) => m.kind === kind);
+  return (models.find((m) => m.carries === carries) ?? models[0]).id;
 }
 
 function same(a: unknown[], b: unknown[]): boolean {
