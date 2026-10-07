@@ -67,6 +67,9 @@ export interface ReplayView {
   label: string;
 }
 
+/** Size on screen (px) of a station badge at a zoom level (pixels per tile). */
+export const stationBadgeSize = (zoom: number): number => Math.max(16, Math.min(32, zoom * 0.95));
+
 export interface Scene {
   map: MapData;
   state: GameState;
@@ -84,4 +87,12 @@ export interface Scene {
   showGrid: boolean;
   /** The player's headquarters bonus area. */
   hqZone: { tile: number; radius: number; color: string; label: string } | null;
+  /** Shares the player owns per industry (green glow). */
+  myShares: Map<number, number>;
+  /** Industries where another company (not an ally) has the majority: the player can't load there. */
+  locked: Set<number>;
+  /** Industries with a running share auction. */
+  auctions: Set<number>;
+  /** A tile or industry lighting up after jumping to it from a list; `t` runs from 0 to 1. */
+  flash: { tile: number; t: number } | null;
 }

@@ -16,13 +16,13 @@ Dit is een **proof of concept**: speelbaar in de browser en installeerbaar als a
 | --- | --- |
 | ![Plannen](docs/img/plannen.jpg) | ![Uitvoering](docs/img/uitvoering-conflict.jpg) |
 
-| Steden: vraag naar producten en passagiers | Beurs: lenen en veilingen van aandelen |
+| Steden: vraag naar producten en passagiers | Beurs: lenen en veilingen (de gekozen industrie licht geel op) |
 | --- | --- |
 | ![Stad](docs/img/stad.jpg) | ![Beurs](docs/img/beurs.jpg) |
 
-| Marktprijzen | Op de telefoon |
+| Jouw aandelen: groene gloed, 🔨 = veiling | Op de telefoon: tik, tik = rechte lijn |
 | --- | --- |
-| ![Markt](docs/img/markt.jpg) | ![Mobiel](docs/img/mobiel.jpg) |
+| ![Aandelen](docs/img/aandelen.jpg) | ![Mobiel](docs/img/mobiel.jpg) |
 
 ## Snel starten
 
@@ -64,9 +64,10 @@ kan meedoen; zie [Hosten](#hosten) om de server online te zetten.
 - Actieslots per beurt (standaard 5, instelbaar 3–20), vrij te vullen en te herschikken; acties worden op de
   server bewaard en kunnen tot de uitvoering worden aangepast. Uitvoering op een vast tijdstip per dag (met
   tijdzone), elke N minuten of handmatig door de host; optioneel eerder zodra iedereen "klaar" is.
-- Acties (elk 1 slot): **een stuk weg, spoor of kanaal** (de routeplanner maakt van een route meteen de
-  benodigde acties: tik op begin en eind), **station bouwen** (wegstation, treinstation, haven; bereik 1 tegel,
-  haven 2), **voertuigen inzetten** tussen twee stations, **voertuigen verkopen**.
+- Acties (elk 1 slot): **een stuk weg, spoor of kanaal** (klik op het begin; de route volgt je muis, of tik op het
+  eind voor een rechte lijn; de stukken komen meteen in je vrije slots), **station bouwen** (laadpunt, treinstation,
+  haven; bereik 1 tegel, haven 2; een station naast je weg of spoor is ermee verbonden), **voertuigen inzetten**
+  tussen twee stations, **voertuigen verkopen**.
 - **Steden** vragen producten én hebben passagiers die naar andere steden willen (bus, passagierstrein, veerboot).
 - Conflictregels per tegel: laagste slot wint, zelfde slot = gedeelde tegel (beide spelers mogen er gebruik van
   maken). Zichtbaar in het rapport en in de afspeelfunctie.
@@ -91,9 +92,10 @@ kan meedoen; zie [Hosten](#hosten) om de server online te zetten.
   aansluiten.
 - **Leningen** (vrije actie): lenen en aflossen in stappen van € 250.000, rente per beurt, kredietlimiet op basis
   van je bezit.
-- **Veilingen van aandelen in industrieën** (vrije actie): vanaf beurt 11 elke beurt een aandeel van 10% van 3
-  industrieën. Aandeelhouders krijgen een deel van wat anderen met die industrie verdienen; met een meerderheid
-  mogen alleen jij en je bondgenoten er laden.
+- **Veilingen van aandelen in industrieën** (vrije actie): vanaf beurt 11 lopen er steeds 3 veilingen tegelijk
+  (een aandeel van 10% per veiling); is er één afgelopen, dan komt er een nieuwe bij. Aandeelhouders krijgen een deel
+  van wat anderen met die industrie verdienen; met een meerderheid mogen alleen jij en je bondgenoten er laden. Je
+  aandelen zie je als groene gloed op de kaart.
 
 Wat nog open staat (schulden en aandelen van bedrijven, gedwongen verkoop, eindspel) staat met een ontwerpvoorstel
 in [docs/ROADMAP.md](docs/ROADMAP.md).

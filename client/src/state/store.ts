@@ -6,11 +6,12 @@ import {
   TRANSPORT,
   VEHICLES,
   World,
-  chebyshev,
+  checkRouteTile,
   checkStationTile,
   emptySlots,
+  extendRoutePath,
   hqError,
-  planRoute,
+  planBuild,
   previewOrders,
 } from '@transport/shared';
 import type {
@@ -29,7 +30,7 @@ import type {
 } from '@transport/shared';
 import { ApiError, api, connectGame } from '../api';
 import { money } from '../format';
-import { errorText, msgText } from '../i18n';
+import { errorText, msgText, reasonText } from '../i18n';
 import { activeIdentity } from '../identity';
 import type { Identity } from '../identity';
 
@@ -38,10 +39,29 @@ export type Tab = 'actions' | 'info' | 'report' | 'market' | 'exchange' | 'playe
 export type ToolState =
   | { kind: 'inspect' }
   | { kind: 'hq' }
-  /** Tap the start, then the end: the route goes into the free slots (one action per segment) and the tool closes. */
-  | { kind: 'route'; transport: TransportKind; start: number | null; stationStart: boolean; stationEnd: boolean }
+  /**
+   * Click the start, then the route follows the pointer (or a tap on the end draws a straight line); the
+   * next click puts it in the free slots (one action per segment) and the tool closes. `path[0]` is the start.
+   */
+  | { kind: 'route'; transport: TransportKind; path: number[]; stationStart: boolean; stationEnd: boolean }
   | { kind: 'station'; station: StationKind; tile: number | null; editSlot: number | null }
-  | { kind: 'vehicles'; from: number | null; to: number | null; model: VehicleModelId; count: number; editSlot: number | null };
+  | {
+      kind: 'vehicles';
+      from: number | null;
+      to: number | null;
+      model: VehicleModelId;
+      count: number;
+      editSlot: number | null;
+      /** The player picked the vehicle: only stations of its kind can be chosen (otherwise the first station decides). */
+      chosen?: boolean;
+    };
+
+/** Where a tap landed exactly (tile coordinates) and how far around it a station badge counts as hit. */
+export interface TapPoint {
+  x: number;
+  y: number;
+  reach: number;
+}
 
 export interface Toast {
   text: string;
@@ -78,6 +98,8 @@ export interface UiState {
   toast: Toast | null;
   connection: 'connecting' | 'online' | 'offline';
   focus: { tile: number; seq: number } | null;
+  /** A tile (or the industry on it) that lights up for a moment after jumping to it from a list. */
+  flash: { tile: number; until: number } | null;
   insets: Insets;
   loadError: string | null;
 }
@@ -116,6 +138,7 @@ export class GameStore {
       toast: null,
       connection: 'connecting',
       focus: null,
+      flash: null,
       insets: { top: 0, right: 0, bottom: 0, left: 0 },
       loadError: null,
     };
@@ -274,23 +297,33 @@ export class GameStore {
     return value;
   }
 
-  /** Route of the route tool from its start to `end` (the hovered or tapped tile). */
-  routePlan(end: number | null): RoutePlan | null {
+  /** What the route drawn with the route tool would build (null until it has at least one segment). */
+  routePlan(): RoutePlan | null {
     const tool = this.state.tool;
     const me = this.state.view?.you?.playerId;
-    if (tool.kind !== 'route' || !me || tool.start === null || end === null || end === tool.start) return null;
+    if (tool.kind !== 'route' || !me || tool.path.length < 2) return null;
     const world = this.planningWorld();
     if (!world) return null;
     let worldId = this.worldIds.get(world);
     if (worldId === undefined) this.worldIds.set(world, (worldId = ++this.seq));
-    const key = `${worldId}|${tool.transport}|${tool.start},${end}`;
+    const key = `${worldId}|${tool.transport}|${tool.path.join(',')}`;
     let plan = this.routeCache.get(key);
     if (!plan) {
-      plan = planRoute(world, me, tool.transport, [tool.start, end]);
+      plan = { path: tool.path, plan: planBuild(world, me, { type: 'build', kind: tool.transport, path: tool.path }) };
       if (this.routeCache.size > 24) this.routeCache.delete(this.routeCache.keys().next().value!);
       this.routeCache.set(key, plan);
     }
     return plan;
+  }
+
+  /** Extends the drawn route to a tile (pointer moved there). */
+  extendRoute(tile: number): void {
+    const tool = this.state.tool;
+    const world = this.planningWorld();
+    const me = this.state.view?.you?.playerId;
+    if (tool.kind !== 'route' || tool.path.length === 0 || !world || !me) return;
+    const path = extendRoutePath(world, me, tool.transport, tool.path, tile);
+    if (path !== tool.path) this.set({ tool: { ...tool, path } });
   }
 
   /** The actions a planned route becomes: one per segment that needs building, plus the chosen stations. */
@@ -425,10 +458,13 @@ export class GameStore {
   }
 
   setHover(hover: number | null): void {
-    if (hover !== this.state.hover) this.set({ hover });
+    if (hover === this.state.hover) return;
+    this.set({ hover });
+    // The route tool draws along the tiles the mouse passes.
+    if (hover !== null && this.state.tool.kind === 'route') this.extendRoute(hover);
   }
 
-  tapTile(tile: number): void {
+  tapTile(tile: number, at?: TapPoint): void {
     const tool = this.state.tool;
     switch (tool.kind) {
       case 'inspect':
@@ -438,11 +474,22 @@ export class GameStore {
         void this.placeHq(tile);
         return;
       case 'route': {
-        if (tool.start === null) {
-          this.set({ tool: { ...tool, start: tile } });
+        if (tool.path.length === 0) {
+          const world = this.planningWorld();
+          const me = this.state.view?.you?.playerId;
+          const check = world && me ? checkRouteTile(world, me, tool.transport, tile) : null;
+          if (check && !check.ok) {
+            this.toast(`Hier kun je niet beginnen: ${reasonText(check.reason)}`, 'error');
+            return;
+          }
+          this.set({ tool: { ...tool, path: [tile] } });
           return;
         }
-        if (tile === tool.start) return;
+        // A click on the start point again starts over from there.
+        if (tile === tool.path[0]) {
+          if (tool.path.length > 1) this.set({ tool: { ...tool, path: [tile] } });
+          return;
+        }
         this.placeRoute(tile);
         return;
       }
@@ -451,18 +498,27 @@ export class GameStore {
         return;
       case 'vehicles': {
         const pickingFrom = tool.from === null || tool.to !== null;
-        const kind = pickingFrom ? null : VEHICLES[tool.model].kind;
-        const station = this.stationNear(tile, kind ?? VEHICLES[tool.model].kind, !pickingFrom);
+        const model = VEHICLES[tool.model];
+        // Once a vehicle is picked (or the first station chosen), only stations of that kind count.
+        const strict = !pickingFrom || !!tool.chosen;
+        const station = this.stationNear(tile, model.kind, strict, at);
         if (!station) {
-          this.toast('Tik op een station van jou of een bondgenoot (geplande stations tellen ook).', 'info');
+          const other = strict ? this.stationNear(tile, model.kind, false, at) : null;
+          if (other) {
+            const needed = STATIONS[model.kind];
+            this.toast(
+              `Dit is een ${STATIONS[other.kind].icon} ${STATIONS[other.kind].name.toLowerCase()}. Een ${model.icon} ${model.name.toLowerCase()} rijdt tussen twee ${needed.icon} ${needed.plural}: tik op een ${needed.name.toLowerCase()} of kies een ander voertuig.`,
+              'error',
+            );
+          } else {
+            this.toast('Tik op een station van jou of een bondgenoot (geplande stations tellen ook).', 'info');
+          }
           return;
         }
         if (pickingFrom) {
-          // The first station decides the kind of vehicle: switch to a matching model when needed.
-          const model = VEHICLES[tool.model].kind === station.kind ? tool.model : defaultModel(station.kind, VEHICLES[tool.model].carries);
-          this.set({ tool: { ...tool, model, from: station.tile, to: null } });
-        } else if (station.kind !== VEHICLES[tool.model].kind) {
-          this.toast(`Kies een ${STATIONS[VEHICLES[tool.model].kind].name.toLowerCase()}: een lijn verbindt twee stations van hetzelfde soort.`, 'error');
+          // Without a picked vehicle the first station decides the kind: switch to a matching model.
+          const next = model.kind === station.kind ? tool.model : defaultModel(station.kind, model.carries);
+          this.set({ tool: { ...tool, model: next, from: station.tile, to: null } });
         } else if (station.tile !== tool.from) {
           this.set({ tool: { ...tool, to: station.tile } });
         }
@@ -472,22 +528,24 @@ export class GameStore {
   }
 
   /**
-   * A usable station on or right next to the tapped tile (station badges are bigger than their tile when
-   * zoomed out). Prefers the tapped tile, then stations of `kind`, then the closest.
+   * The usable station whose badge was tapped: the closest one within reach of the tap point (badges are
+   * bigger than their tile when zoomed out). Stations of `kind` win from equally close others.
    */
-  stationNear(tile: number, kind: StationKind, sameKindOnly: boolean): Station | null {
+  stationNear(tile: number, kind: StationKind, sameKindOnly: boolean, at?: TapPoint): Station | null {
     const world = this.planningWorld();
     const me = this.state.view?.you?.playerId;
     if (!world || !me) return null;
     const w = world.grid.width;
-    const x = tile % w;
-    const y = Math.floor(tile / w);
+    const px = at?.x ?? (tile % w) + 0.5;
+    const py = at?.y ?? Math.floor(tile / w) + 0.5;
+    const reach = Math.max(1.2, at?.reach ?? 1.5);
     let best: Station | null = null;
     let bestScore = Infinity;
     for (const st of world.state.stations) {
-      const d = chebyshev(x, y, st.tile % w, Math.floor(st.tile / w));
-      if (d > 1 || !world.canUse(st.owners, me) || (sameKindOnly && st.kind !== kind)) continue;
-      const score = d * 10 + (st.kind === kind ? 0 : 5) + Math.hypot(x - (st.tile % w), y - Math.floor(st.tile / w));
+      if (!world.canUse(st.owners, me) || (sameKindOnly && st.kind !== kind)) continue;
+      const d = Math.hypot(px - ((st.tile % w) + 0.5), py - (Math.floor(st.tile / w) + 0.5));
+      if (d > reach) continue;
+      const score = d + (st.kind === kind ? 0 : 0.5);
       if (score < bestScore) {
         bestScore = score;
         best = st;
@@ -496,13 +554,20 @@ export class GameStore {
     return best;
   }
 
-  /** Second tap of the route tool: plan the route and put it in the free slots, one action per segment. */
-  private placeRoute(end: number): void {
+  /** Last click of the route tool: put the drawn route in the free slots, one action per segment. */
+  placeRoute(end: number): void {
     const tool = this.state.tool;
     if (tool.kind !== 'route') return;
-    const plan = this.routePlan(end);
-    if (!plan?.path || plan.error || !plan.plan || plan.plan.fatal) {
-      this.toast(plan?.plan?.fatal ? msgText(plan.plan.fatal) : errorText(plan?.error ?? 'unreachable'), 'error');
+    // On touch screens there is no pointer trail: the tap on the end draws a straight line to it.
+    this.extendRoute(end);
+    const plan = this.routePlan();
+    const current = this.state.tool;
+    if (current.kind === 'route' && current.path[current.path.length - 1] !== end) {
+      this.toast(errorText('unreachable'), 'error');
+      return;
+    }
+    if (!plan?.path || !plan.plan || plan.plan.fatal) {
+      this.toast(plan?.plan?.fatal ? msgText(plan.plan.fatal) : errorText('unreachable'), 'error');
       return;
     }
     const actions = this.routeActions(plan);
@@ -554,8 +619,9 @@ export class GameStore {
     this.set({ insets });
   }
 
-  focusTile(tile: number): void {
-    this.set({ focus: { tile, seq: ++this.seq } });
+  /** Moves the map to a tile; with `flash` the tile (or the industry on it) lights up for a moment. */
+  focusTile(tile: number, flash = false): void {
+    this.set({ focus: { tile, seq: ++this.seq }, ...(flash ? { flash: { tile, until: performance.now() + FLASH_MS } } : {}) });
   }
 
   toast(text: string, kind: Toast['kind'] = 'info'): void {
@@ -656,6 +722,9 @@ export class GameStore {
     }
   }
 }
+
+/** How long a tile or industry lights up after jumping to it from a list. */
+export const FLASH_MS = 2600;
 
 /** A vehicle model for a station kind, preferably one that carries the same (freight or passengers). */
 export function defaultModel(kind: StationKind, carries: 'cargo' | 'passengers' = 'cargo'): VehicleModelId {

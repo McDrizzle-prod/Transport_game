@@ -21,8 +21,27 @@
 | **Testronde 1:** na 10 beurten elke beurt aandelen (10%) van 3 industrieën in de veiling; een bod moet een hele beurt het hoogste blijven | ✅ |
 | **Testronde 1:** kleiner bereik van stations | ✅ 1 tegel (haven 2); industrieën liggen verder uit elkaar |
 | **Testronde 1:** 1 actie per tegel weg/spoor en per station | ✅ |
+| **Testronde 2:** twee laadpunten kiezen voor vrachtwagens lukte niet (havens wel) | ✅ zie hieronder |
+| **Testronde 2:** soms stukken weg op tegels waar de muis niet was | ✅ de route volgt nu de muis |
+| **Testronde 2:** maximaal 3 veilingen tegelijk; pas na afloop een nieuwe | ✅ |
+| **Testronde 2:** eigen aandelen zichtbaar op de kaart | ✅ groene gloed + "2/10"; ook 🔨 bij veilingen en 🔒 bij een meerderheid van een ander |
+| **Testronde 2:** gele gloed bij het springen naar een industrie vanuit de veilingen | ✅ ook bij tegels uit het rapport |
 | Veilingen voor aandelen in industrieën (exclusief gebruik / winstdeling) | ✅ basisversie, zie hieronder |
 | Schulden → gedwongen verkoop van eigen aandelen → laatste alliantie wint | 🟡 leningen zijn er; aandelen van bedrijven en het eindspel nog niet |
+
+### Testronde 2: oorzaak van het laadpunt-probleem
+
+Er speelden drie dingen tegelijk, die nu alle drie zijn opgelost:
+
+1. Het station-gereedschap begon met **treinstation**; wie niet omschakelde, bouwde treinstations in plaats van
+   laadpunten. Nu begint het met een laadpunt en onthoudt het je laatste keuze.
+2. Een laadpunt **naast** de weg (in plaats van precies op het eind) was niet verbonden. Nu is een laadpunt of
+   treinstation verbonden met een weg of spoor van jou die erop of direct naast ligt (havens liggen altijd aan het
+   water, daarom werkten die wel).
+3. Na het kiezen van een vrachtwagen werd een tik op een ander soort station stilletjes omgezet naar een ander
+   voertuig. Nu blijft je keuze staan en legt het spel uit welk soort station nodig is. Ook telt een tik op het
+   icoon van een station, ook als je net naast de tegel tikt, en staat er een duidelijke melding als al je slots
+   vol zijn.
 
 ### Gemaakte keuzes bij testronde 1 (graag feedback)
 
@@ -32,7 +51,7 @@
   bij 6 of meer aandelen bepaal je dat alleen jij en je bondgenoten er mogen laden. Beide getallen staan in
   `AUCTIONS` in `shared/src/config.ts`.
 - **Een bod moet een hele beurt het hoogste blijven**: een bod uit beurt T wint aan het eind van beurt T+1. Zonder
-  bod vervalt een veiling na 3 beurten.
+  bod vervalt een veiling na 3 beurten. Er lopen steeds 3 veilingen tegelijk (testronde 2).
 - **Geld voor een bod** wordt meteen gereserveerd, zodat niemand meer kan bieden dan hij heeft.
 - **Hoofdkantoorbonus**: beide stations van een lijn moeten binnen 10 tegels van het hoofdkantoor liggen (Chebyshev,
   dus een vierkant van 21 × 21 tegels).
@@ -99,7 +118,7 @@ afhandeling in `closeAuctions`, grafiek van de bedrijfswaarde in het tabblad Beu
 
 **Bediening**
 - Een geplande route in één keer verplaatsen naar andere slots (nu per stuk met ▲/▼).
-- Routes met tussenpunten (nu: begin en eind; voor een andere route plan je twee kortere stukken).
+- Een al geplande route achteraf aanpassen (nu: verwijderen en opnieuw tekenen).
 
 ## Techniek
 

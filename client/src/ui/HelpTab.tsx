@@ -37,7 +37,11 @@ export function HelpTab() {
       </ul>
       <h4>Bouwen</h4>
       <ul>
-        <li>Kies Weg, Spoor of Kanaal, tik op het begin en daarna op het eind. De route komt meteen in je vrije slots en je bent weer klaar om de kaart te gebruiken.</li>
+        <li>
+          Kies Weg, Spoor of Kanaal en klik op het begin. Beweeg dan de muis over de tegels waar de route moet komen en klik op het eind (terug
+          bewegen haalt stukken weg). Op een telefoon: tik op het eind voor een rechte lijn, of sleep vanaf het beginpunt. De route komt meteen in je
+          vrije slots.
+        </li>
         <li>
           {TRANSPORT.road.name} ({money(TRANSPORT.road.edgeCost)}), {TRANSPORT.rail.name.toLowerCase()} ({money(TRANSPORT.rail.edgeCost)}) en{' '}
           {TRANSPORT.canal.name.toLowerCase()} ({money(TRANSPORT.canal.edgeCost)}) per stuk op vlak land. Bos, heuvels, bruggen en tunnels zijn
@@ -47,6 +51,7 @@ export function HelpTab() {
           Een station bedient alleen wat er <strong>direct naast</strong> ligt: {STATIONS.road.name.toLowerCase()} en treinstation{' '}
           {STATIONS.rail.radius} tegel, haven {STATIONS.water.radius} tegels. Je moet industrieën dus echt met elkaar verbinden.
         </li>
+        <li>Een laadpunt of treinstation hoort op of direct naast je weg of spoor te staan; dan is het daarmee verbonden.</li>
         <li>Stadsstraten zijn openbaar: vrachtwagens en bussen van iedereen mogen erover. Schepen varen gratis over open water.</li>
       </ul>
       <h4>Conflicten</h4>
@@ -82,8 +87,9 @@ export function HelpTab() {
           {Math.round(LOANS.rate * 100)}% per beurt.
         </li>
         <li>
-          Na beurt {AUCTIONS.startAfterTurn} komt er elke beurt van {AUCTIONS.perTurn} industrieën een aandeel (10%) in de veiling. Een bod blijft
-          staan tot iemand hoger biedt; staat het een hele beurt als hoogste, dan is het aandeel van jou.
+          Na beurt {AUCTIONS.startAfterTurn} lopen er steeds {AUCTIONS.maxOpen} veilingen tegelijk, elk voor een aandeel (10%) in een industrie;
+          als er één is afgelopen, komt er een nieuwe bij. Een bod blijft staan tot iemand hoger biedt; staat het een hele beurt als hoogste, dan is
+          het aandeel van jou.
         </li>
         <li>
           Per aandeel krijg je {Math.round(AUCTIONS.tollPerShare * 100)}% van wat anderen met vracht van die industrie verdienen. Met{' '}

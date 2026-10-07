@@ -77,9 +77,10 @@ function Auctions() {
     <div className="info-block">
       <h4>🔨 Veilingen van aandelen</h4>
       <p className="small">
-        Na beurt {AUCTIONS.startAfterTurn} komt er elke beurt van {AUCTIONS.perTurn} industrieën een aandeel van 10% in de veiling. Een aandeel geeft
-        je {Math.round(AUCTIONS.tollPerShare * 100)}% van wat <em>anderen</em> verdienen met vracht van die industrie. Met {AUCTIONS.majority} of
-        meer aandelen bepaal je wie er mag laden: alleen jij en je bondgenoten.
+        Na beurt {AUCTIONS.startAfterTurn} lopen er steeds {AUCTIONS.maxOpen} veilingen tegelijk, elk voor een aandeel van 10% in een industrie.
+        Zodra een veiling is afgelopen, komt er een nieuwe bij. Een aandeel geeft je {Math.round(AUCTIONS.tollPerShare * 100)}% van wat{' '}
+        <em>anderen</em> verdienen met vracht van die industrie. Met {AUCTIONS.majority} of meer aandelen bepaal je wie er mag laden: alleen jij en
+        je bondgenoten. Op de kaart: 🔨 = veiling, groene gloed = jouw aandelen, 🔒 = alleen voor een ander.
       </p>
       <p className="muted small">
         Je bod wordt meteen gereserveerd en komt terug als iemand hoger biedt (minstens {Math.round(AUCTIONS.minIncrement * 100)}% meer). Blijft
@@ -141,7 +142,7 @@ function AuctionRow({ auction }: { auction: Auction }) {
   return (
     <li className={`auction ${mine ? 'mine' : ''}`}>
       <div className="auction-head">
-        <button className="link" onClick={() => ind && store.focusTile(ind.y * store.getState().map!.width + ind.x)}>
+        <button className="link" onClick={() => ind && store.focusTile(ind.y * store.getState().map!.width + ind.x, true)}>
           {industryLabel(ind)}
         </button>
         {ind && (
@@ -201,7 +202,7 @@ function Holdings() {
           const holder = majorityHolder(ind);
           return (
             <li key={ind.id}>
-              <button className="link small" onClick={() => store.focusTile(ind.y * store.getState().map!.width + ind.x)}>
+              <button className="link small" onClick={() => store.focusTile(ind.y * store.getState().map!.width + ind.x, true)}>
                 {industryLabel(ind)}
               </button>
               :{' '}

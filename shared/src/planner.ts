@@ -1,10 +1,12 @@
-// Route planner for the build tools: cheapest buildable path through a list of waypoints.
-// Runs on every pointer move in the client, so the search uses flat typed arrays and lookup
-// tables that are computed once per (world, player, transport kind).
+// Route planning for the build tools. The route tool follows the player's pointer (extendRoutePath);
+// gaps are filled with a straight line, or with the cheapest buildable path around an obstacle
+// (planRoute). That search runs on pointer moves, so it uses flat typed arrays and lookup tables that
+// are computed once per (world, player, transport kind).
 import { MAX_ROUTE_EDGES, TERRAIN, TRANSPORT } from './config';
-import { checkRouteTile, planBuild } from './construction';
+import { checkRouteTile, crossingOwners, edgeNeeded, planBuild, stepAllowed } from './construction';
 import type { ConstructionPlan } from './construction';
-import { DIRS, MinHeap, SQRT2, chebyshev, crossingPair, tileX, tileY } from './geometry';
+import { DIRS, MinHeap, SQRT2, chebyshev, crossingPair, edgeKey, isAdjacent, tileX, tileY, toIndex } from './geometry';
+import type { Grid } from './geometry';
 import { Terrain, TileUse } from './types';
 import type { PlayerId, TransportKind } from './types';
 import type { World } from './world';
@@ -212,4 +214,75 @@ export function planRoute(world: World, player: PlayerId, kind: TransportKind, w
   if (path.length < 2 || new Set(path).size !== path.length) return { path: null, error: 'unreachable' };
   if (path.length - 1 > MAX_ROUTE_EDGES) return { path, error: 'too_long' };
   return { path, plan: planBuild(world, player, { type: 'build', kind, path }) };
+}
+
+/** Tiles on a straight line from a to b (both included), one step per tile (8 directions): as few segments as possible. */
+export function straightLine(grid: Grid, a: number, b: number): number[] {
+  const ax = tileX(grid, a);
+  const ay = tileY(grid, a);
+  const bx = tileX(grid, b);
+  const by = tileY(grid, b);
+  const n = Math.max(Math.abs(bx - ax), Math.abs(by - ay));
+  const tiles = [a];
+  for (let k = 1; k <= n; k++) tiles.push(toIndex(grid, Math.round(ax + ((bx - ax) * k) / n), Math.round(ay + ((by - ay) * k) / n)));
+  return tiles;
+}
+
+/** Can a route of `kind` take the step a→b: an own (or allied) segment, or one the player may build? */
+function canStep(world: World, player: PlayerId, kind: TransportKind, a: number, b: number): boolean {
+  const existing = world.edge(edgeKey(kind, a, b));
+  if (existing && world.canUse(existing.owners, player)) return true;
+  if (!checkRouteTile(world, player, kind, b).ok || !stepAllowed(world, kind, a, b)) return false;
+  return !(edgeNeeded(world, kind, a, b) && crossingOwners(world, a, b));
+}
+
+/** Tiles where a bend is kept: junctions with the existing network, stations and streets keep the route connected. */
+function keepCorner(world: World, player: PlayerId, kind: TransportKind, tile: number): boolean {
+  if (world.stationAt.has(tile)) return true;
+  if (kind === 'road' && world.map.use[tile] === TileUse.CityStreet) return true;
+  return world.edgesAt(tile).some((e) => e.kind === kind && world.canUse(e.owners, player));
+}
+
+/**
+ * The route tool follows the pointer: extends `path` to `tile`, the way the player drew it.
+ * - Moving back onto the route takes it back to that tile.
+ * - A gap (a fast pointer, or a tap on touch screens) is filled with a straight line, or with the
+ *   cheapest way around an obstacle.
+ * - An L-shaped bend becomes one diagonal segment: one action less.
+ * Returns `path` itself when the tile can't be reached.
+ */
+export function extendRoutePath(world: World, player: PlayerId, kind: TransportKind, path: number[], tile: number): number[] {
+  if (path.length === 0) return checkRouteTile(world, player, kind, tile).ok ? [tile] : path;
+  const back = path.indexOf(tile);
+  if (back >= 0) return back === path.length - 1 ? path : path.slice(0, back + 1);
+  const last = path[path.length - 1];
+  let steps: number[] | null = straightLine(world.grid, last, tile).slice(1);
+  let prev = last;
+  for (const t of steps) {
+    if (!canStep(world, player, kind, prev, t)) {
+      steps = null;
+      break;
+    }
+    prev = t;
+  }
+  if (!steps) {
+    const around = planRoute(world, player, kind, [last, tile]);
+    if (!around.path || around.error) return path;
+    steps = around.path.slice(1);
+  }
+  let result = path.slice();
+  for (const t of steps) {
+    const k = result.indexOf(t);
+    if (k >= 0) {
+      result = result.slice(0, k + 1);
+      continue;
+    }
+    result.push(t);
+    const n = result.length;
+    if (n >= 3) {
+      const [a, corner, b] = [result[n - 3], result[n - 2], result[n - 1]];
+      if (isAdjacent(world.grid, a, b) && !keepCorner(world, player, kind, corner) && canStep(world, player, kind, a, b)) result.splice(n - 2, 1);
+    }
+  }
+  return result.length - 1 > MAX_ROUTE_EDGES ? path : result;
 }

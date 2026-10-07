@@ -45,6 +45,14 @@ function forEachMove(
         if (nb >= 0 && isStreet(world, nb)) visit(nb, 1);
       }
     }
+    // A station connects to the player's road or track right next to it (like a loading bay along the
+    // road), so it doesn't have to stand exactly on the end of the road.
+    for (let d = 0; d < 8; d++) {
+      const nb = neighbor(grid, tile, d);
+      if (nb < 0) continue;
+      if (tile === start && onNetwork(world, player, kind, nb)) visit(nb, stepLength(grid, tile, nb));
+      else if (nb === goal && tile !== start && world.stationAt.get(goal)?.kind === kind) visit(nb, stepLength(grid, tile, nb));
+    }
     return;
   }
 
@@ -70,6 +78,23 @@ function forEachMove(
       if (nb === goal) visit(nb, stepLength(grid, tile, nb));
     }
   }
+}
+
+/** Does a vehicle of this kind have a way on or off this tile (a usable road/track, or a city street)? */
+export function onNetwork(world: World, player: PlayerId, kind: StationKind, tile: number): boolean {
+  if (kind === 'road' && isStreet(world, tile)) return true;
+  return world.edgesAt(tile).some((e) => e.kind === kind && edgeUsable(world, e, player));
+}
+
+/** Is a (planned) station on this tile connected to the player's network, directly or next to it? */
+export function stationLinked(world: World, player: PlayerId, kind: StationKind, tile: number): boolean {
+  if (kind === 'water') return true; // harbours always lie at the water
+  if (onNetwork(world, player, kind, tile)) return true;
+  for (let d = 0; d < 8; d++) {
+    const nb = neighbor(world.grid, tile, d);
+    if (nb >= 0 && onNetwork(world, player, kind, nb)) return true;
+  }
+  return false;
 }
 
 function hasUsableCanal(world: World, player: PlayerId, tile: number): boolean {

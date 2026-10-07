@@ -145,14 +145,14 @@ function ResultLine({ r, color, mine, width, name }: { r: SlotResult; color: str
       </div>
       {r.cost > 0 && <span className="small muted">{money(r.cost)}</span>}
       {groupBy(r.lost, (l) => `${l.owners.join(',')}|${l.turn}|${l.slot}`).map((g) => (
-        <button key={`l${g[0].tile}`} className="link small conflict" onClick={() => store.focusTile(g[0].tile)}>
+        <button key={`l${g[0].tile}`} className="link small conflict" onClick={() => store.focusTile(g[0].tile, true)}>
           ✖ {tiles(g.length)} {tileLabel(g[0].tile, width)}
           {g.length > 1 ? ' e.a.' : ''} {g[0].owners.length ? `al van ${g[0].owners.map(name).join(' & ')}` : 'geweigerd'}
           {g[0].turn ? ` (beurt ${g[0].turn}, slot ${g[0].slot})` : ''}
         </button>
       ))}
       {groupBy(r.shared, (sh) => sh.with.join(',')).map((g) => (
-        <button key={`s${g[0].tile}`} className="link small shared" onClick={() => store.focusTile(g[0].tile)}>
+        <button key={`s${g[0].tile}`} className="link small shared" onClick={() => store.focusTile(g[0].tile, true)}>
           ⇄ {tiles(g.length)} {tileLabel(g[0].tile, width)}
           {g.length > 1 ? ' e.a.' : ''} gedeeld met {g[0].with.map(name).join(' & ')} (zelfde slot)
         </button>

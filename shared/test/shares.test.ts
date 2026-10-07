@@ -75,20 +75,30 @@ function auctionWorld() {
 }
 
 describe('share auctions', () => {
-  it('start after turn 10 with a few industries every turn', () => {
+  it('start after turn 10; at most 3 run at the same time and a new one starts when one ends', () => {
     const w = auctionWorld();
     const early = run(w, { ...w.state, turn: AUCTIONS.startAfterTurn - 1 });
     expect(early.state.auctions).toHaveLength(0);
 
     const { state, report } = run(w, w.state);
-    expect(state.auctions).toHaveLength(AUCTIONS.perTurn);
-    expect(report.auctions.filter((a) => a.status === 'opened')).toHaveLength(AUCTIONS.perTurn);
+    expect(state.auctions).toHaveLength(AUCTIONS.maxOpen);
+    expect(report.auctions.filter((a) => a.status === 'opened')).toHaveLength(AUCTIONS.maxOpen);
     const auction = state.auctions[0];
     expect(auction.openedTurn).toBe(AUCTIONS.startAfterTurn + 1);
     const ind = state.industries.find((i) => i.id === auction.industry)!;
     expect(auction.minBid).toBe(auctionStartPrice(ind));
-    // The next turn: one more industry (the fourth); the others already have an open auction.
-    expect(run(w, state).state.auctions).toHaveLength(AUCTIONS.perTurn + 1);
+
+    // No new auctions while three are running.
+    expect(placeBid(state, 'A', auction.id, auction.minBid, 0)).toBeNull();
+    const t11 = run(w, state);
+    expect(t11.state.auctions.filter((a) => a.status === 'open')).toHaveLength(AUCTIONS.maxOpen);
+    expect(t11.report.auctions).toHaveLength(0);
+    // End of turn 12: the share is sold and the fourth industry takes its place.
+    const t12 = run(w, t11.state);
+    const open = t12.state.auctions.filter((a) => a.status === 'open');
+    expect(open).toHaveLength(AUCTIONS.maxOpen);
+    expect(t12.report.auctions.map((a) => a.status).sort()).toEqual(['opened', 'sold']);
+    expect(open.some((a) => a.industry === auction.industry)).toBe(false);
   });
 
   it('reserve the money of the highest bid and give it back when somebody bids more', () => {

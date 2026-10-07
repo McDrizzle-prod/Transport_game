@@ -38,17 +38,23 @@ voertuig-acties. De volgorde is dus belangrijk:
 | Actie | Kost | Wat het doet |
 | --- | --- | --- |
 | **Een stuk weg / spoor / kanaal** | 1 actie per stuk | Eén stuk van een tegel naar een aangrenzende tegel (ook schuin). Een route van 8 stukken kost dus 8 acties. Stukken die al bestaan (je eigen netwerk, stadsstraten, open water) kosten niets. |
-| **Station bouwen** | 1 actie | Wegstation, treinstation of haven. |
+| **Station bouwen** | 1 actie | Laadpunt (voor vrachtwagens en bussen), treinstation of haven. |
 | **Voertuigen inzetten** | 1 actie | 1–5 voertuigen tussen twee stations van jou (of een bondgenoot) die via je netwerk verbonden zijn. Ze vormen samen een lijn. |
 | **Voertuigen verkopen** | 1 actie | Verkoop voertuigen van een lijn voor 50% van de nieuwprijs (via de info van een station). |
 | **Lenen / aflossen / bieden** | geen actie | Gaat direct in, via het tabblad Beurs. |
 
-**Zo plan je een route:** kies Weg, Spoor of Kanaal, tik op het begin en daarna op het eind. De planner kiest de
-goedkoopste route en zet elk stuk dat gebouwd moet worden direct in je vrije actieslots (vink vooraf aan of je aan
-het begin en/of eind een station wilt; elk station is een extra actie). Daarna ben je terug in de gewone
-kaartweergave. Past de route niet helemaal, dan worden de eerste stukken gepland; de rest bouw je volgende beurt
-verder vanaf het eind. In de lijst met acties staat een route als één regel (bijv. "slot 2–9"), die je kunt
-openklappen of in één keer kunt verwijderen.
+**Zo plan je een route:** kies Weg, Spoor of Kanaal en klik op de tegel waar de route begint.
+
+- **Met een muis** beweeg je daarna over de tegels waar de route moet komen: de weg volgt je muis. Een bocht in een
+  L-vorm wordt één schuin stuk (één actie minder). Beweeg je terug over de route, dan haal je de stukken weer weg.
+  Klik op het eind om de route te plannen.
+- **Op een telefoon of tablet** tik je op het eind: de route loopt dan in een rechte lijn (om obstakels heen). Of
+  sleep vanaf het beginpunt om de route precies te tekenen; loslaten plant hem.
+
+Elk stuk dat gebouwd moet worden, komt direct in je vrije actieslots (vink vooraf aan of je aan het begin en/of eind
+een station wilt; elk station is een extra actie). Daarna ben je terug in de gewone kaartweergave. Past de route niet
+helemaal, dan worden de eerste stukken gepland; de rest bouw je volgende beurt verder vanaf het eind. In de lijst met
+acties staat een route als één regel (bijv. "slot 2–9"), die je kunt openklappen of in één keer kunt verwijderen.
 
 ## Conflicten
 
@@ -90,7 +96,7 @@ Kanalen over open water zijn gratis: schepen varen daar al.
 
 | Station | Kosten | Onderhoud | Bereik |
 | --- | --- | --- | --- |
-| 🚏 Wegstation | € 30.000 | € 1.000 | 1 tegel |
+| 🚏 Laadpunt | € 30.000 | € 1.000 | 1 tegel |
 | 🚉 Treinstation | € 90.000 | € 3.000 | 1 tegel |
 | ⚓ Haven | € 100.000 | € 3.000 | 2 tegels, moet aan water liggen |
 
@@ -98,6 +104,10 @@ Een station bedient alleen de industrieën en steden waarvan een tegel **direct 
 het bereik, in een vierkant rond het station). Tussen twee industrieën liggen altijd minstens 2 tegels, dus één
 station kan nooit twee industrieën tegelijk bedienen: je moet echt een verbinding bouwen. Stations zijn van de bouwer;
 gedeelde stations van allebei.
+
+Een laadpunt of treinstation is verbonden met je weg of spoor als het erop staat of er **direct naast** ligt (ook
+schuin); een laadpunt naast een stadsstraat is verbonden met de straten van die stad. Het station-gereedschap laat
+bij het kiezen van een plek zien of dat zo is. Havens liggen altijd aan het water en zijn dus altijd bereikbaar.
 
 ## Productieketens
 
@@ -159,8 +169,10 @@ rijdt met zijn eigen snelheid en levert af bij aankomst. Daarna laadt het voor d
 vervoeren valt). Voertuigen zijn aan het eind van een beurt gewoon onderweg en rijden de volgende beurt verder.
 Meerdere voertuigen op één lijn vertrekken gespreid.
 
-Kies je bij het inzetten eerst een station, dan past het soort voertuig zich aan (bijv. treinstation → trein). Een
-tik naast een station kiest dat station ook.
+Kies je bij het inzetten eerst een voertuig (bijv. een vrachtwagen), dan kun je alleen stations van dat soort kiezen
+(laadpunten); tik je op een ander soort station, dan legt het spel uit waarom dat niet kan. Kies je eerst een station,
+dan past het soort voertuig zich aan (bijv. treinstation → trein). Een tik op het icoon van een station telt, ook als
+je net naast de tegel tikt.
 
 ## Opbrengst
 
@@ -210,8 +222,9 @@ hebt. Leen dan bij, verkoop voertuigen of wacht op opbrengsten.
 ### Veilingen van aandelen in industrieën
 
 - Elke industrie heeft **10 aandelen** van 10%, aanvankelijk allemaal van de bank.
-- **Na beurt 10** komen er elke beurt aandelen van **3 willekeurige industrieën** in de veiling (één aandeel per
-  industrie). De startprijs hangt af van wat de industrie produceert.
+- **Na beurt 10** lopen er steeds **3 veilingen tegelijk**, elk voor één aandeel van een willekeurige industrie.
+  Pas als een veiling is afgelopen (verkocht of vervallen), komt er een nieuwe bij, voor een andere industrie. De
+  startprijs hangt af van wat de industrie produceert.
 - Bieden kost geen actie. Een nieuw bod moet minstens **5% hoger** zijn dan het hoogste bod. Het geld van het
   hoogste bod wordt direct gereserveerd; wie wordt overboden, krijgt zijn geld meteen terug.
 - **Een bod moet een hele beurt het hoogste blijven**: een bod uit beurt T wint aan het eind van beurt T+1 als
@@ -220,6 +233,9 @@ hebt. Leen dan bij, verkoop voertuigen of wacht op opbrengsten.
 - **Wat een aandeel oplevert**: per aandeel krijg je **3%** van de opbrengst die *andere* spelers maken met vracht
   van die industrie (zij dragen dat af; met 2 aandelen dus 6%).
 - **Meerderheid (6 of meer aandelen)**: alleen jij en je bondgenoten mogen nog vracht laden bij die industrie.
+- **Op de kaart**: 🔨 = er loopt een veiling, een groene gloed met bijv. "2/10" = jouw aandelen, 🔒 = een ander heeft
+  de meerderheid (jij mag er niet laden). Klik je in het tabblad Beurs op een industrie, dan springt de kaart
+  ernaartoe en licht de industrie geel op.
 
 ## Allianties
 

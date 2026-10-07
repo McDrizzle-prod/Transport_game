@@ -194,32 +194,55 @@ try {
   await page.getByRole('button', { name: 'Start het spel' }).click();
   await page.waitForTimeout(600);
 
-  // A road with stations at both ends: tap the start, then the end. It goes straight into the slots.
+  // A road between the tiles next to the two loading points: click the start, move to the end and click.
+  // It goes straight into the free slots, one action per tile.
+  const towards = (from, to) => {
+    const [fx, fy] = xy(from);
+    const [tx, ty] = xy(to);
+    return tileOf(fx + Math.sign(tx - fx), fy + Math.sign(ty - fy));
+  };
+  const roadStart = towards(stationA, stationB);
+  const roadEnd = towards(stationB, stationA);
   await page.getByRole('button', { name: 'Weg' }).click();
-  await page.getByText('aan het begin').click();
-  await page.getByText('aan het eind').click();
-  await focus(stationA);
-  await clickTile(stationA);
-  const [ex, ey] = await clientPos(stationB);
+  await focus(roadStart);
+  await clickTile(roadStart);
+  const [ex, ey] = await clientPos(roadEnd);
   await page.mouse.move(ex, ey);
   await page.waitForTimeout(300);
   await page.screenshot({ path: path.join(shots, '03-plan-road.png') });
   await page.mouse.click(ex, ey);
   await page.waitForTimeout(400);
-  check((await page.getByRole('button', { name: 'Bekijken' }).getAttribute('aria-pressed')) === 'true', 'route tool closes after the second tap');
+  check((await page.getByRole('button', { name: 'Bekijken' }).getAttribute('aria-pressed')) === 'true', 'route tool closes after the second click');
   await saved();
 
   view = await api('GET', `/api/games/${gameId}/view`, undefined, await identity());
-  const planned = view.orders.slots.filter(Boolean);
-  const segments = planned.filter((a) => a.type === 'build');
+  const segments = view.orders.slots.filter(Boolean);
+  const [sx0, sy0] = xy(roadStart);
+  const [ex0, ey0] = xy(roadEnd);
   check(
-    planned[0]?.type === 'station' && planned[planned.length - 1]?.type === 'station' && segments.every((a) => a.path.length === 2),
-    `road planned as ${segments.length} one-tile actions between two station actions`,
+    segments.every((a) => a.type === 'build' && a.path.length === 2) && segments.length === Math.max(Math.abs(ex0 - sx0), Math.abs(ey0 - sy0)),
+    `straight road planned as ${segments.length} one-tile actions`,
   );
   const roadPath = [segments[0].path[0], ...segments.map((a) => a.path[1])];
 
-  // Trucks: tap the first station, then next to the second one (taps snap to a station nearby).
+  // Loading points beside both ends of the road, with the station tool (it starts with a loading point).
+  for (const tile of [stationA, stationB]) {
+    await page.getByRole('button', { name: 'Station' }).click();
+    await clickTile(tile);
+    const panel = await page.locator('.tool-panel').innerText();
+    check(panel.includes('Laadpunt') && panel.includes('Sluit aan op je weg'), `loading point next to the road is connected (${tile})`);
+    await page.locator('.tool-panel').getByRole('button', { name: /In slot/ }).click();
+    await saved();
+  }
+
+  // A picked vehicle only fits its own kind of station.
   await page.getByRole('button', { name: 'Voertuigen' }).click();
+  await page.locator('.model', { hasText: 'Stoomtrein' }).click();
+  await clickTile(stationA);
+  check((await page.locator('.toast').innerText()).includes('laadpunt'), 'a train refuses a loading point with an explanation');
+
+  // Trucks: pick the truck, tap the first loading point, then next to the second one (taps snap to it).
+  await page.locator('.model', { hasText: 'Vrachtwagen' }).first().click();
   await clickTile(stationA);
   const [bx, by] = xy(stationB);
   const nearB = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => tileOf(bx + dx, by + dy)).find((t) => !roadPath.includes(t)) ?? stationB;
@@ -227,12 +250,15 @@ try {
   await page.getByRole('button', { name: 'Meer', exact: true }).click();
   await page.waitForTimeout(300);
   await page.screenshot({ path: path.join(shots, '04-plan-vehicles.png') });
-  const vehicleSlot = planned.length + 1;
+  check(!(await page.locator('.tool-panel').innerText()).includes('niet verbonden'), 'the loading points are connected by the road');
+  const planned = segments.length + 2;
+  const vehicleSlot = planned + 1;
   await page.getByRole('button', { name: new RegExp(`In slot ${vehicleSlot}`) }).click();
   await saved();
 
   view = await api('GET', `/api/games/${gameId}/view`, undefined, await identity());
   check(view.orders.slots[vehicleSlot - 1]?.type === 'vehicles' && view.orders.slots[vehicleSlot - 1].to === stationB, 'vehicles planned (tap next to a station selects it)');
+  const ourSlots = view.orders.slots;
 
   // Conflicts. The rival builds a road straight across ours, one segment per slot. The segment that reaches
   // our road does so in the same slot as ours: that tile is shared. Then we plan a second, parallel road in
@@ -263,10 +289,11 @@ try {
     }
   }
   if (across) {
-    // Our road reaches roadPath[at] with segment at-1, which is in slot at+1 (slot 1 is the station).
+    // The rival reaches roadPath[at] in the same slot as our segment that claims it.
+    const claim = ourSlots.findIndex((a) => a?.type === 'build' && a.path[1] === roadPath[at]);
     const order = side > 0 ? [[2, 3], [3, 4], [4, 5], [5, 6], [1, 2], [0, 1]] : [[4, 3], [3, 2], [2, 1], [1, 0], [5, 4], [6, 5]];
     const slots = Array.from({ length: 20 }, () => null);
-    order.forEach(([u, v], k) => (slots[at + k] = { type: 'build', kind: 'road', path: [across[u], across[v]] }));
+    order.forEach(([u, v], k) => (slots[claim + k] = { type: 'build', kind: 'road', path: [across[u], across[v]] }));
     await api('PUT', `/api/games/${gameId}/orders`, { slots, ready: true }, rival.token);
 
     await page.getByRole('button', { name: 'Weg' }).click();
@@ -342,6 +369,85 @@ try {
   view = await api('GET', `/api/games/${gameId}/view`);
   check(view.game.alliances.length === 1, 'alliance accepted through the UI');
 
+  // Drawing with the mouse: the road follows the tiles the pointer passes (an L-shaped bend becomes a diagonal).
+  view = await api('GET', `/api/games/${gameId}/view`);
+  const taken = (t) => !!view.game.infra.tiles[t] || view.game.stations.some((st) => st.tile === t) || view.game.players.some((p) => p.hq === t);
+  let corner = null;
+  const [hqx, hqy] = xy(hq);
+  for (let r = 2; r < 14 && corner === null; r++) {
+    for (const [dx, dy] of [[r, -r], [-r, -r], [r, r], [-r, r], [r, 0], [0, r], [-r, 0], [0, -r]]) {
+      const x0 = hqx + dx;
+      const y0 = hqy + dy;
+      const area = [];
+      for (let y = y0; y <= y0 + 3; y++) for (let x = x0; x <= x0 + 3; x++) area.push(tileOf(x, y));
+      if (area.every((t) => free(t) && !taken(t))) {
+        corner = [x0, y0];
+        break;
+      }
+    }
+  }
+  if (corner) {
+    const [x0, y0] = corner;
+    await page.getByRole('tab', { name: /Acties/ }).click();
+    await page.getByRole('button', { name: 'Weg' }).click();
+    await focus(tileOf(x0 + 2, y0 + 2));
+    await clickTile(tileOf(x0, y0));
+    for (const [dx, dy] of [[1, 0], [2, 0], [3, 0], [3, 1], [3, 2], [3, 3]]) {
+      const [px, py] = await clientPos(tileOf(x0 + dx, y0 + dy));
+      await page.mouse.move(px, py, { steps: 2 });
+      await page.waitForTimeout(40);
+    }
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: path.join(shots, '10c-draw-road.png') });
+    const drawn = await page.evaluate(() => window.__transportrijk.route());
+    check(
+      drawn.includes(tileOf(x0 + 2, y0)) && drawn.includes(tileOf(x0 + 3, y0 + 2)) && drawn[drawn.length - 1] === tileOf(x0 + 3, y0 + 3) && drawn.length === 6,
+      `the road follows the mouse (${drawn.length - 1} pieces for an L of 6)`,
+    );
+    await page.locator('.tool-panel').getByRole('button', { name: 'Annuleren' }).click();
+
+    // Dragging from the start draws the road too; letting go plans it.
+    await page.getByRole('button', { name: 'Weg' }).click();
+    await clickTile(tileOf(x0, y0 + 3));
+    const [dx0, dy0] = await clientPos(tileOf(x0, y0 + 3));
+    await page.mouse.move(dx0, dy0);
+    await page.mouse.down();
+    for (const dx of [1, 2, 3]) {
+      const [px, py] = await clientPos(tileOf(x0 + dx, y0 + 3));
+      await page.mouse.move(px, py, { steps: 3 });
+    }
+    await page.mouse.up();
+    await saved();
+    const dragged = (await api('GET', `/api/games/${gameId}/view`, undefined, await identity())).orders.slots.filter(Boolean);
+    check(dragged.length === 3 && dragged.every((a) => a.type === 'build'), `dragging plans the road (${dragged.length} actions)`);
+    await page.getByRole('button', { name: 'Alle acties wissen' }).click();
+    await saved();
+  } else log('no free area to draw in, skipping that check');
+
+  // Auctions: after turn 10 three run at the same time; a share we win glows green on the map.
+  const myToken = await identity();
+  for (let turn = view.game.turn; turn <= 10; turn++) await api('POST', `/api/games/${gameId}/resolve`, {}, myToken);
+  view = await api('GET', `/api/games/${gameId}/view`);
+  let open = view.game.auctions.filter((a) => a.status === 'open');
+  check(view.game.turn === 11 && open.length === 3, `three auctions open in turn ${view.game.turn} (${open.length})`);
+  const won = open[0];
+  await api('POST', `/api/games/${gameId}/bid`, { auction: won.id, amount: won.minBid }, myToken);
+  await api('POST', `/api/games/${gameId}/resolve`, {}, myToken);
+  await api('POST', `/api/games/${gameId}/resolve`, {}, myToken);
+  view = await api('GET', `/api/games/${gameId}/view`);
+  open = view.game.auctions.filter((a) => a.status === 'open');
+  const share = view.game.industries.find((i) => i.id === won.industry);
+  check(share.shares[me.id] === 1 && open.length === 3, 'share won; a new auction took its place');
+  await page.waitForTimeout(800);
+  await page.keyboard.press('Escape'); // stop the replay
+  await page.getByRole('tab', { name: /Beurs/ }).click();
+  await page.locator('.auction .link').first().click();
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: path.join(shots, '13-auction-flash.png') });
+  await focus(tileOf(share.x, share.y));
+  await page.waitForTimeout(2600);
+  await page.screenshot({ path: path.join(shots, '14-share-glow.png') });
+
   // --- phone: the rival opens the game on a small touch screen --------------------------
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const mobile = await phone.newPage();
@@ -364,6 +470,35 @@ try {
   await mobile.screenshot({ path: path.join(shots, '12-mobile-rail-tool.png') });
   const sheet = await mobile.locator('.sheet').boundingBox();
   check(!!sheet && sheet.height < 844 * 0.6, 'bottom sheet leaves room for the map on phones');
+
+  // Touch: tap the start and the end of a track: a straight line goes into the slots.
+  const rivalView = await api('GET', `/api/games/${gameId}/view`, undefined, rival.token);
+  const busy = (t) => !!rivalView.game.infra.tiles[t] || rivalView.game.stations.some((st) => st.tile === t);
+  const [rx, ry] = xy(rivalHq);
+  let track = null;
+  for (let r = 1; r <= 12 && !track; r++) {
+    for (const [ox, oy] of [[r, 0], [-r - 4, 0], [0, r], [0, -r], [r, r], [-r - 4, -r]]) {
+      const row = [0, 1, 2, 3, 4].map((dx) => tileOf(rx + ox + dx, ry + oy));
+      if (row.every((t) => free(t) && !busy(t) && t !== rivalHq && map.terrain[t] !== 3)) {
+        track = row;
+        break;
+      }
+    }
+  }
+  if (track) {
+    const mid = track[2];
+    await mobile.evaluate((t) => window.__transportrijk.focus(t), mid);
+    await mobile.waitForTimeout(700);
+    for (const t of [track[0], track[track.length - 1]]) {
+      const [x, y] = await mobile.evaluate((tile) => window.__transportrijk.tileToClient(tile), t);
+      await mobile.touchscreen.tap(x, y);
+      await mobile.waitForTimeout(250);
+    }
+    await mobile.waitForTimeout(900);
+    await mobile.screenshot({ path: path.join(shots, '13-mobile-track.png') });
+    const rivalOrders = (await api('GET', `/api/games/${gameId}/view`, undefined, rival.token)).orders.slots.filter(Boolean);
+    check(rivalOrders.length === track.length - 1 && rivalOrders.every((a) => a.type === 'build' && a.kind === 'rail'), `tap, tap: a straight track (${rivalOrders.length} actions)`);
+  } else log('no room for the touch track check');
 } finally {
   await browser.close();
   server.kill();

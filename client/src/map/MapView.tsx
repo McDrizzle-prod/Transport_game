@@ -1,13 +1,14 @@
 // Canvas map: camera, touch/mouse input and the render loop. Lives outside React's render cycle.
 import { useEffect, useRef } from 'react';
-import { HQ_BONUS, STATIONS, VEHICLES, checkStationTile, coverageAt, findRoute, hqError, pointOnRoute } from '@transport/shared';
+import { HQ_BONUS, STATIONS, VEHICLES, checkStationTile, coverageAt, findRoute, hqError, majorityHolder, pointOnRoute } from '@transport/shared';
 import type { Action, Edge, GameState, Route, SlotResult, Station, TurnReport, World } from '@transport/shared';
 import { money } from '../format';
 import { groupPath, slotGroups, slotRange } from '../state/groups';
-import { useStore } from '../state/store';
+import { FLASH_MS, useStore } from '../state/store';
 import type { GameStore, UiState } from '../state/store';
 import { MapRenderer } from './renderer';
 import type { Camera } from './renderer';
+import { stationBadgeSize } from './scene';
 import type { FloatingText, ReplayView, Scene, SlotMarker, ToolOverlay, VehicleSprite } from './scene';
 import { buildTerrainLayer } from './terrain';
 
@@ -33,6 +34,8 @@ interface Gesture {
   cam: Camera;
   moved: boolean;
   pinch: { dist: number; midX: number; midY: number; world: [number, number] } | null;
+  /** Dragging from the end of a route being drawn extends it instead of moving the map. */
+  draw: boolean;
 }
 
 class MapController {
@@ -53,6 +56,7 @@ class MapController {
   private readonly lastAngle = new Map<number, number>();
   private fitted = false;
   private insets: unknown = null;
+  private flashWasOn = false;
 
   constructor(canvas: HTMLCanvasElement, store: GameStore) {
     this.canvas = canvas;
@@ -76,6 +80,10 @@ class MapController {
       tileToClient: (tile: number) => this.tileToClient(tile),
       camera: () => ({ ...this.cam }),
       focus: (tile: number) => this.store.focusTile(tile),
+      route: () => {
+        const tool = this.store.getState().tool;
+        return tool.kind === 'route' ? tool.path : null;
+      },
     };
   }
 
@@ -182,7 +190,7 @@ class MapController {
     this.pointers.set(e.pointerId, { x, y });
     this.anim = null;
     if (this.pointers.size === 1) {
-      this.gesture = { startX: x, startY: y, cam: { ...this.cam }, moved: false, pinch: null };
+      this.gesture = { startX: x, startY: y, cam: { ...this.cam }, moved: false, pinch: null, draw: this.startsDrawing(x, y) };
     } else if (this.pointers.size === 2) {
       const [a, b] = [...this.pointers.values()];
       const midX = (a.x + b.x) / 2;
@@ -193,9 +201,21 @@ class MapController {
         cam: { ...this.cam },
         moved: true,
         pinch: { dist: Math.hypot(a.x - b.x, a.y - b.y), midX, midY, world: this.renderer.toWorld(this.cam, midX, midY) },
+        draw: false,
       };
     }
   };
+
+  /** A press on (or right next to) the end of the route being drawn starts drawing. */
+  private startsDrawing(x: number, y: number): boolean {
+    const tool = this.store.getState().tool;
+    if (tool.kind !== 'route' || tool.path.length === 0) return false;
+    const map = this.store.getState().map!;
+    const [wx, wy] = this.renderer.toWorld(this.cam, x, y);
+    const end = tool.path[tool.path.length - 1];
+    const reach = Math.max(0.9, 22 / this.cam.zoom);
+    return Math.hypot(wx - ((end % map.width) + 0.5), wy - (Math.floor(end / map.width) + 0.5)) <= reach;
+  }
 
   private onPointerMove = (e: PointerEvent) => {
     const [x, y] = this.local(e);
@@ -221,6 +241,11 @@ class MapController {
       return;
     }
     if (!g.moved && Math.hypot(x - g.startX, y - g.startY) > TAP_SLOP) g.moved = true;
+    if (g.draw) {
+      const tile = this.tileAt(x, y);
+      if (g.moved && tile !== null) this.store.extendRoute(tile);
+      return;
+    }
     if (g.moved && !g.pinch) {
       this.setCam({ zoom: g.cam.zoom, x: g.cam.x - (x - g.startX) / g.cam.zoom, y: g.cam.y - (y - g.startY) / g.cam.zoom });
     }
@@ -229,17 +254,27 @@ class MapController {
   private onPointerUp = (e: PointerEvent) => {
     const g = this.gesture;
     const wasTap = g && !g.moved && this.pointers.size === 1;
+    const drew = g && g.draw && g.moved && this.pointers.size === 1;
     this.pointers.delete(e.pointerId);
     if (this.pointers.size === 0) this.gesture = null;
     else if (this.pointers.size === 1 && g?.pinch) {
       // Continue panning with the remaining finger.
       const [p] = [...this.pointers.values()];
-      this.gesture = { startX: p.x, startY: p.y, cam: { ...this.cam }, moved: true, pinch: null };
+      this.gesture = { startX: p.x, startY: p.y, cam: { ...this.cam }, moved: true, pinch: null, draw: false };
+    }
+    if (drew) {
+      // Letting go after drawing plans the route.
+      const tool = this.store.getState().tool;
+      if (tool.kind === 'route' && tool.path.length > 1) this.store.placeRoute(tool.path[tool.path.length - 1]);
+      return;
     }
     if (wasTap) {
       const [x, y] = this.local(e);
       const tile = this.tileAt(x, y);
-      if (tile !== null) this.store.tapTile(tile);
+      const [wx, wy] = this.renderer.toWorld(this.cam, x, y);
+      // Station badges are bigger than a tile when zoomed out: a tap anywhere on the badge counts.
+      const reach = (stationBadgeSize(this.cam.zoom) / 2 + 8) / this.cam.zoom;
+      if (tile !== null) this.store.tapTile(tile, { x: wx, y: wy, reach });
     }
   };
 
@@ -267,8 +302,9 @@ class MapController {
       if (s.replay) this.store.stopReplay();
       else if (s.tool.kind !== 'inspect' && s.tool.kind !== 'hq') this.store.setTool({ kind: 'inspect' });
       else this.store.select(null);
-    } else if (e.key === 'Backspace' && s.tool.kind === 'route' && s.tool.start !== null) {
-      this.store.setTool({ ...s.tool, start: null });
+    } else if (e.key === 'Backspace' && s.tool.kind === 'route' && s.tool.path.length > 0) {
+      // Takes the last piece of the route back (or the start point).
+      this.store.setTool({ ...s.tool, path: s.tool.path.slice(0, -1) });
     } else if (e.key === '+' || e.key === '=') {
       this.flyTo({ ...this.cam, zoom: this.cam.zoom * 1.4 });
     } else if (e.key === '-') {
@@ -314,7 +350,9 @@ class MapController {
       this.dirty = true;
     }
     const replaying = !!s.replay;
-    if (!this.dirty && !replaying) return;
+    const flashing = !!s.flash && now < s.flash.until;
+    if (!this.dirty && !replaying && !flashing && !this.flashWasOn) return;
+    this.flashWasOn = flashing;
     this.dirty = false;
     const scene = this.buildScene(s, now);
     if (scene) this.renderer.draw(scene, this.cam);
@@ -369,6 +407,17 @@ class MapController {
     }
 
     const mine = state.players.find((p) => p.id === me);
+    // Shares: own ones glow, industries another company decides about get a lock.
+    const myShares = new Map<number, number>();
+    const locked = new Set<number>();
+    for (const ind of state.industries) {
+      const n = me ? (ind.shares?.[me] ?? 0) : 0;
+      if (n > 0) myShares.set(ind.id, n);
+      const holder = majorityHolder(ind);
+      if (holder && me && !world.canUse([holder], me)) locked.add(ind.id);
+    }
+    const auctions = new Set(state.auctions.filter((a) => a.status === 'open').map((a) => a.industry));
+    const flash = s.flash && now < s.flash.until ? { tile: s.flash.tile, t: 1 - (s.flash.until - now) / FLASH_MS } : null;
     return {
       map,
       state,
@@ -388,6 +437,10 @@ class MapController {
         mine && mine.hq !== null && !replay
           ? { tile: mine.hq, radius: HQ_BONUS.radius, color: mine.color, label: `HQ-bonus +${Math.round(HQ_BONUS.bonus * 100)}%` }
           : null,
+      myShares,
+      locked,
+      auctions,
+      flash,
     };
   }
 
@@ -398,14 +451,14 @@ class MapController {
     if (!me) return null;
     switch (tool.kind) {
       case 'route': {
-        const plan = this.store.routePlan(s.hover);
-        const ok = !!plan?.path && !plan.error && !plan.plan?.fatal;
+        const plan = this.store.routePlan();
+        const ok = !!plan?.path && !plan.plan?.fatal;
         const actions = plan && ok ? this.store.routeActions(plan).length : 0;
         const free = this.store.freeSlots().length;
         return {
           kind: 'route',
           transport: tool.transport,
-          start: tool.start,
+          start: tool.path[0] ?? null,
           path: plan?.path ?? null,
           blocked: (plan?.plan?.blocked ?? []).map((b) => b.tile),
           label: ok && plan?.plan ? `${actions} acties · ${money(plan.plan.cost)}${actions > free ? ` · ${free} vrij` : ''}` : null,
@@ -428,10 +481,12 @@ class MapController {
       case 'vehicles': {
         const world = this.store.planningWorld();
         const kind = VEHICLES[tool.model].kind;
-        // Before the first pick every own station is a candidate (the vehicle adapts); after it, only the same kind.
+        // Before the first pick every own station is a candidate (the vehicle adapts), unless the player picked
+        // a vehicle; after the first pick only stations of the same kind.
+        const open = (tool.from === null || tool.to !== null) && !tool.chosen;
         const candidates = world
           ? world.state.stations
-              .filter((st) => world.canUse(st.owners, me) && (tool.from === null || tool.to !== null || st.kind === kind))
+              .filter((st) => world.canUse(st.owners, me) && (open || st.kind === kind))
               .map((st) => ({ tile: st.tile, match: st.kind === kind }))
           : [];
         return { kind: 'vehicles', from: tool.from, to: tool.to, hover: s.hover, candidates };

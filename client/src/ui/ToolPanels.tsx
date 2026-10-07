@@ -13,11 +13,25 @@ import {
   cityPassengers,
   coverageAt,
   estimateLine,
+  stationLinked,
 } from '@transport/shared';
 import type { CargoId, StationKind, VehicleModelId } from '@transport/shared';
 import { dec, money, num, tileLabel } from '../format';
-import { TRANSPORT_ICON, cargoLabel, errorText, msgText, reasonText } from '../i18n';
+import { TRANSPORT_ICON, cargoLabel, msgText, reasonText } from '../i18n';
 import { useStore, useUi } from '../state/store';
+import { rememberStation } from './ToolBar';
+
+/** Explains why the confirm button is disabled when every slot is used. */
+function SlotsFull() {
+  const store = useStore();
+  useUi((s) => s.draft);
+  if (store.targetSlot() >= 0) return null;
+  return (
+    <p className="warn small">
+      Al je {store.slotCount()} actieslots zijn gevuld. Verwijder eerst een actie, of plan dit volgende beurt.
+    </p>
+  );
+}
 
 function SlotTarget() {
   const store = useStore();
@@ -34,18 +48,21 @@ function FreeSlots() {
   return <span className={`badge ${free ? 'slotbadge' : 'failed'}`}>{free ? `${free} vrije acties` : 'alle slots vol'}</span>;
 }
 
+/** Devices with a mouse draw routes by hovering; touch screens tap or drag. */
+const canHover = () => typeof window !== 'undefined' && window.matchMedia('(hover: hover)').matches;
+
 export function RouteToolPanel() {
   const store = useStore();
   const tool = useUi((s) => s.tool);
-  const hover = useUi((s) => s.hover);
   useUi((s) => s.draft);
   if (tool.kind !== 'route') return null;
-  const plan = store.routePlan(hover);
+  const plan = store.routePlan();
   const actions = plan ? store.routeActions(plan) : [];
   const free = store.freeSlots().length;
   const stationKind = TRANSPORT[tool.transport].station;
   const blocked = plan?.plan?.blocked ?? [];
   const name = TRANSPORT[tool.transport].name.toLowerCase();
+  const end = tool.path[tool.path.length - 1];
 
   return (
     <section className="panel-section tool-panel">
@@ -56,17 +73,18 @@ export function RouteToolPanel() {
         <FreeSlots />
       </div>
       <p className="hint">
-        {tool.start === null
-          ? `Tik op het begin van je ${name}, daarna op het eind. De route wordt dan meteen in je actieslots gezet.`
-          : `Tik nu op het eind. Je ${name} komt direct in je vrije actieslots, daarna kun je weer gewoon de kaart gebruiken.`}
+        {tool.path.length === 0
+          ? `${canHover() ? 'Klik' : 'Tik'} op de tegel waar je ${name} moet beginnen.`
+          : canHover()
+            ? `Beweeg de muis over de tegels waar je ${name} moet komen en klik op het eind. Terug over je ${name} bewegen haalt stukken weg.`
+            : `Tik op het eind voor een rechte ${name}, of sleep vanaf het beginpunt om hem precies te tekenen.`}
       </p>
       <p className="muted small">
         Elk stuk van tegel naar tegel kost <strong>1 actie</strong> (een station ook). Kies dus waar je je acties aan besteedt: wat je deze beurt
         niet kwijt kunt, bouw je volgende beurt verder.
       </p>
-      {plan?.error && hover !== null && <p className="error">{errorText(plan.error)}</p>}
       {plan?.plan?.fatal && <p className="error">{msgText(plan.plan.fatal)}</p>}
-      {plan?.path && plan.plan && !plan.error && (
+      {plan?.path && plan.plan && !plan.plan.fatal && (
         <p className="route-summary">
           <strong>{num(actions.length)} acties</strong> · {money(plan.plan.cost)}
           {actions.length > free && <span className="warn small"> · past niet helemaal: {free} vrij, de rest volgende beurt</span>}
@@ -85,7 +103,7 @@ export function RouteToolPanel() {
           </label>
           <span className="muted small">
             {money(STATIONS[stationKind].cost)} per station · bereik {STATIONS[stationKind].radius} tegel rondom: bouw het direct naast een industrie of
-            stad.
+            stad. Een {STATIONS[stationKind].name.toLowerCase()} naast je {name} is er ook mee verbonden.
           </span>
         </div>
       )}
@@ -97,11 +115,18 @@ export function RouteToolPanel() {
         <p className="muted small">Schepen varen vrij over open water. Een kanaal verbindt water over land; bouw er havens (⚓) naast.</p>
       )}
       <div className="button-row">
-        <button className="secondary" disabled={tool.start === null} onClick={() => store.setTool({ ...tool, start: null })}>
-          ↶ Ander beginpunt
+        <button className="secondary" disabled={tool.path.length === 0} onClick={() => store.setTool({ ...tool, path: [] })}>
+          ↶ Opnieuw
         </button>
         <button className="secondary" onClick={() => store.setTool({ kind: 'inspect' })}>
           Annuleren
+        </button>
+        <button
+          className="primary"
+          disabled={!plan?.plan || !!plan.plan.fatal || actions.length === 0 || free === 0}
+          onClick={() => end !== undefined && store.placeRoute(end)}
+        >
+          ✓ Plannen
         </button>
       </div>
     </section>
@@ -124,6 +149,8 @@ export function StationToolPanel() {
   const cov = world && tile !== null ? coverageAt(world, tool.station, tile) : null;
   const slot = store.targetSlot();
   const canPlace = !!check && check.ok && !check.exists && tool.tile !== null;
+  const linked = world && tile !== null && check?.ok && !check.exists ? stationLinked(world, me.id, tool.station, tile) : null;
+  const network = tool.station === 'rail' ? 'spoor' : 'weg';
 
   return (
     <section className="panel-section tool-panel">
@@ -133,7 +160,14 @@ export function StationToolPanel() {
       </div>
       <div className="segmented">
         {STATION_KINDS.map((k) => (
-          <button key={k} className={tool.station === k ? 'active' : ''} onClick={() => store.setTool({ ...tool, station: k })}>
+          <button
+            key={k}
+            className={tool.station === k ? 'active' : ''}
+            onClick={() => {
+              rememberStation(k);
+              store.setTool({ ...tool, station: k });
+            }}
+          >
             {STATIONS[k].icon} {STATIONS[k].name}
             <small>
               {money(STATIONS[k].cost)} · bereik {STATIONS[k].radius}
@@ -149,7 +183,14 @@ export function StationToolPanel() {
       </p>
       {check && !check.ok && <p className="error">Kan hier niet: {reasonText(check.reason)}</p>}
       {check?.ok && check.exists && <p className="warn">Hier staat al een station van jou.</p>}
+      {linked === true && tool.station !== 'water' && <p className="ok-text small">🔗 Sluit aan op je {network}.</p>}
+      {linked === false && (
+        <p className="warn small">
+          ⚠ Hier ligt (nog) geen {network} van jou op of direct naast: leg er een {network} naartoe, anders kunnen er geen voertuigen rijden.
+        </p>
+      )}
       {cov && <CoverageList industries={cov.industries.map((i) => i.id)} cities={cov.cities.map((c) => c.id)} />}
+      <SlotsFull />
       <div className="button-row">
         <button className="secondary" onClick={() => store.setTool({ kind: 'inspect' })}>
           Annuleren
@@ -159,7 +200,7 @@ export function StationToolPanel() {
           disabled={!canPlace || slot < 0}
           onClick={() => tool.tile !== null && store.addAction({ type: 'station', kind: tool.station, tile: tool.tile })}
         >
-          ✓ {tool.editSlot !== null ? 'Bijwerken' : 'In slot'} {slot + 1}
+          {slot < 0 ? 'Alle slots vol' : `✓ ${tool.editSlot !== null ? 'Bijwerken' : 'In slot'} ${slot + 1}`}
         </button>
       </div>
     </section>
@@ -241,8 +282,8 @@ export function VehicleToolPanel() {
       <div className="models">
         {MODEL_GROUPS.map((g) => (
           <div key={g.kind} className="model-group">
-            <span className="muted small">
-              {STATIONS[g.kind].icon} {g.label}
+            <span className="model-kind" title={STATIONS[g.kind].plural}>
+              {STATIONS[g.kind].icon}
             </span>
             {g.models.map((id) => {
               const m = VEHICLES[id];
@@ -250,27 +291,31 @@ export function VehicleToolPanel() {
                 <button
                   key={id}
                   className={`model ${tool.model === id ? 'active' : ''}`}
+                  aria-pressed={tool.model === id}
                   onClick={() =>
                     store.setTool({
                       ...tool,
                       model: id,
+                      chosen: true,
                       ...(VEHICLES[tool.model].kind !== m.kind ? { from: null, to: null } : {}),
                     })
                   }
                 >
                   <span className="model-icon">{m.icon}</span>
                   <span className="model-name">{m.name}</span>
-                  <span className="model-stats">
-                    {m.capacity} {unit(id)} · {m.speed} tegels/beurt
-                    <br />
-                    {money(m.price)} + {money(m.upkeep)}/beurt
-                  </span>
                 </button>
               );
             })}
           </div>
         ))}
       </div>
+      <p className="model-stats">
+        <strong>
+          {model.icon} {model.name}
+        </strong>
+        : {model.capacity} {unit(tool.model)} · {model.speed} tegels per beurt · {money(model.price)} + {money(model.upkeep)} per beurt · rijdt tussen{' '}
+        {STATIONS[model.kind].icon} {STATIONS[model.kind].plural}
+      </p>
       <p className="hint">
         {tool.from === null
           ? 'Tik op het eerste station (van jou of een bondgenoot; geplande stations tellen ook). Het soort voertuig past zich aan.'
@@ -365,6 +410,7 @@ export function VehicleToolPanel() {
           </p>
         </div>
       )}
+      <SlotsFull />
       <div className="button-row">
         <button className="secondary" onClick={() => store.setTool({ ...tool, from: null, to: null })} disabled={tool.from === null}>
           Opnieuw kiezen
@@ -381,7 +427,7 @@ export function VehicleToolPanel() {
             store.addAction({ type: 'vehicles', model: tool.model, from: tool.from, to: tool.to, count: tool.count })
           }
         >
-          ✓ {tool.editSlot !== null ? 'Bijwerken' : 'In slot'} {slot + 1}
+          {slot < 0 ? 'Alle slots vol' : `✓ ${tool.editSlot !== null ? 'Bijwerken' : 'In slot'} ${slot + 1}`}
         </button>
       </div>
     </section>

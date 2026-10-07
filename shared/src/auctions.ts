@@ -1,6 +1,7 @@
 // Shares of industries and the auctions in which they are sold.
 //
-// After AUCTIONS.startAfterTurn turns, a few industries put one share (10%) up for auction every turn.
+// After AUCTIONS.startAfterTurn turns there are always a few auctions running (AUCTIONS.maxOpen), each for one
+// share (10%) of an industry; when one ends, a new one starts.
 // Bidding is a free action (no slot). The money of the highest bid is reserved straight away and
 // returned when somebody bids more. An auction closes when its highest bid has stood for one full
 // turn: a bid placed during turn T wins at the execution of turn T + 1 if nobody outbids it.
@@ -93,12 +94,18 @@ export function closeAuctions(state: GameState, report: TurnReport): void {
   state.auctions = state.auctions.filter((a) => a.status === 'open' || (a.closedTurn ?? 0) > state.turn - 5);
 }
 
-/** End of a turn's execution: puts shares of a few random industries up for auction for the next turn. */
+/** End of a turn's execution: tops the running auctions up to AUCTIONS.maxOpen with shares of random industries. */
 export function openAuctions(state: GameState, rng: Rng, report: TurnReport): void {
   if (state.turn < AUCTIONS.startAfterTurn) return;
-  const busy = new Set(state.auctions.filter((a) => a.status === 'open').map((a) => a.industry));
-  const candidates = state.industries.filter((ind) => bankShares(ind) > 0 && !busy.has(ind.id));
-  for (const ind of rng.shuffle(candidates).slice(0, AUCTIONS.perTurn)) {
+  const open = state.auctions.filter((a) => a.status === 'open');
+  const room = AUCTIONS.maxOpen - open.length;
+  if (room <= 0) return;
+  const busy = new Set(open.map((a) => a.industry));
+  // Industries whose auction just ended come last, so the offer changes.
+  const ended = new Set(state.auctions.filter((a) => a.closedTurn === state.turn).map((a) => a.industry));
+  const candidates = rng.shuffle(state.industries.filter((ind) => bankShares(ind) > 0 && !busy.has(ind.id)));
+  candidates.sort((a, b) => Number(ended.has(a.id)) - Number(ended.has(b.id)));
+  for (const ind of candidates.slice(0, room)) {
     const auction: Auction = {
       id: state.nextId++,
       industry: ind.id,

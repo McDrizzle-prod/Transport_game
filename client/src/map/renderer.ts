@@ -1,7 +1,7 @@
 // Draws one frame of the map: terrain layer + infrastructure, stations, vehicles, plans and overlays.
 import { CARGO, HQ_BONUS, INDUSTRIES, MIN_HQ_DISTANCE, STATIONS, Terrain, cityPassengers } from '@transport/shared';
 import type { CargoId } from '@transport/shared';
-import type { Edge, Station } from '@transport/shared';
+import type { Edge, Industry, Station } from '@transport/shared';
 import { INFRA, hexToRgba } from './palette';
 import type { Scene, SlotMarker, ToolOverlay, VehicleSprite } from './scene';
 import type { TerrainLayer } from './terrain';
@@ -99,6 +99,21 @@ export class MapRenderer {
     // Screen space from here on.
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.drawIndustries(scene, cam, view);
+    if (scene.flash && !scene.state.industries.some((ind) => flashHits(scene.flash!.tile, map.width, ind))) {
+      // A tile (e.g. a conflict from the report): a pulsing yellow square.
+      const t = scene.flash.tile;
+      const [x0, y0] = this.toScreen(cam, t % map.width, Math.floor(t / map.width));
+      const k = cam.zoom;
+      const ctx = this.ctx;
+      ctx.save();
+      ctx.globalAlpha = pulse(scene.flash.t);
+      ctx.shadowColor = '#ffd54a';
+      ctx.shadowBlur = 14;
+      ctx.strokeStyle = '#ffd54a';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(x0 - 4, y0 - 4, k + 8, k + 8);
+      ctx.restore();
+    }
     this.drawCities(scene, cam);
     this.drawStations(scene, cam, view);
     this.drawHqs(scene, cam);
@@ -507,13 +522,51 @@ export class MapRenderer {
 
   // --- screen layers -------------------------------------------------------------
 
+  /** A soft light around an industry, covering its footprint and its icon. */
+  private glow(cam: Camera, ind: Industry, sx: number, sy: number, size: number, color: string, alpha: number): void {
+    const ctx = this.ctx;
+    const half = Math.max((ind.w * cam.zoom) / 2 + 5, size / 2 + 8);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 24;
+    this.roundRect(sx - half, sy - half, 2 * half, 2 * half, half * 0.4);
+    ctx.fillStyle = hexToRgba(color, 0.3);
+    ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+    // A thin light edge keeps the glow visible on grass and forest.
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Small icon on a dark disc next to an industry icon. */
+  private tag(emoji: string, x: number, y: number): void {
+    const ctx = this.ctx;
+    ctx.beginPath();
+    ctx.arc(x, y, 9, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(16, 24, 32, 0.9)';
+    ctx.fill();
+    this.drawGlyph(emoji, x, y, 12);
+  }
+
   private drawIndustries(scene: Scene, cam: Camera, v: View): void {
     const size = Math.max(18, Math.min(34, cam.zoom * 1.1));
+    const w = scene.map.width;
+    const flash = scene.flash;
     for (const ind of scene.state.industries) {
       if (ind.x + ind.w < v.x0 || ind.x > v.x1 || ind.y + ind.h < v.y0 || ind.y > v.y1) continue;
       const def = INDUSTRIES[ind.type];
       const [sx, sy] = this.toScreen(cam, ind.x + ind.w / 2, ind.y + ind.h / 2);
       const ctx = this.ctx;
+      const shares = scene.myShares.get(ind.id) ?? 0;
+      // Own shares: a green glow. Jumped to from a list: a pulsing yellow one.
+      if (shares > 0) this.glow(cam, ind, sx, sy, size, '#4cd964', 0.95);
+      if (flash && flashHits(flash.tile, w, ind)) this.glow(cam, ind, sx, sy, size + 6, '#ffd54a', pulse(flash.t));
       ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
       ctx.beginPath();
       ctx.arc(sx, sy, size / 2, 0, Math.PI * 2);
@@ -522,6 +575,24 @@ export class MapRenderer {
       ctx.strokeStyle = def.color;
       ctx.stroke();
       this.drawGlyph(def.icon, sx, sy, size * 0.58);
+      const r = size / 2 + 2;
+      if (scene.auctions.has(ind.id)) this.tag('🔨', sx - r, sy - r);
+      if (scene.locked.has(ind.id)) this.tag('🔒', sx + r, sy + r);
+      if (shares > 0) {
+        const text = `${shares}/10`;
+        ctx.font = `800 11px ${UI_FONT}`;
+        const tw = ctx.measureText(text).width + 10;
+        this.roundRect(sx + r - 6, sy - r - 9, tw, 18, 9);
+        ctx.fillStyle = '#2e9d4a';
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, sx + r - 1, sy - r + 0.5);
+      }
       if (cam.zoom >= 11) {
         this.label(ind.name, sx, sy + size / 2 + 9, `600 11px ${UI_FONT}`);
         if (cam.zoom >= 18) {
@@ -781,6 +852,18 @@ export class MapRenderer {
     ctx.textBaseline = 'middle';
     ctx.fillText(text, this.width / 2, 77);
   }
+}
+
+/** Is the flashed tile part of this industry? */
+function flashHits(tile: number, width: number, ind: Industry): boolean {
+  const x = tile % width;
+  const y = Math.floor(tile / width);
+  return x >= ind.x && x < ind.x + ind.w && y >= ind.y && y < ind.y + ind.h;
+}
+
+/** Three pulses that fade out at the end (t from 0 to 1). */
+function pulse(t: number): number {
+  return (0.5 + 0.5 * Math.sin(t * Math.PI * 3 + Math.PI / 2) ** 2) * Math.min(1, (1 - t) * 5);
 }
 
 function shade(hex: string, amount: number): string {

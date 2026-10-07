@@ -268,6 +268,7 @@ export const TRANSPORT: Record<TransportKind, TransportDef> = {
 export interface StationDef {
   id: StationKind;
   name: string;
+  plural: string;
   /** Used to name stations: "<prefix> <place>". */
   prefix: string;
   icon: string;
@@ -280,9 +281,9 @@ export interface StationDef {
 }
 
 export const STATIONS: Record<StationKind, StationDef> = {
-  road: { id: 'road', name: 'Wegstation', prefix: 'Wegstation', icon: '🚏', cost: 30_000, upkeep: 1_000, radius: 1, transport: 'road' },
-  rail: { id: 'rail', name: 'Treinstation', prefix: 'Station', icon: '🚉', cost: 90_000, upkeep: 3_000, radius: 1, transport: 'rail' },
-  water: { id: 'water', name: 'Haven', prefix: 'Haven', icon: '⚓', cost: 100_000, upkeep: 3_000, radius: 2, transport: 'canal' },
+  road: { id: 'road', name: 'Laadpunt', plural: 'laadpunten', prefix: 'Laadpunt', icon: '🚏', cost: 30_000, upkeep: 1_000, radius: 1, transport: 'road' },
+  rail: { id: 'rail', name: 'Treinstation', plural: 'treinstations', prefix: 'Station', icon: '🚉', cost: 90_000, upkeep: 3_000, radius: 1, transport: 'rail' },
+  water: { id: 'water', name: 'Haven', plural: 'havens', prefix: 'Haven', icon: '⚓', cost: 100_000, upkeep: 3_000, radius: 2, transport: 'canal' },
 };
 
 export interface VehicleModel {
@@ -428,8 +429,8 @@ export const LOANS = {
 export const AUCTIONS = {
   /** Auctions start after this many turns. */
   startAfterTurn: 10,
-  /** Industries that put a share up for auction every turn. */
-  perTurn: 3,
+  /** At most this many auctions run at the same time; when one ends, a new one starts. */
+  maxOpen: 3,
   sharesPerIndustry: 10,
   /** A new bid must be at least this much higher than the current one. */
   minIncrement: 0.05,
