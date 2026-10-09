@@ -4,7 +4,9 @@ import { CARGO, HQ_BONUS, INDUSTRIES, LOAD_TICKS, PASSENGERS_PER_INHABITANT, STA
 import { chebyshev, distToRect, euclid, tileX, tileY } from './geometry';
 import type { Grid } from './geometry';
 import { findRoute } from './pathfind';
-import type { CargoId, City, GameState, Industry, PlayerId, Station, StationKind, VehicleModelId } from './types';
+import { Routing, stationDistance, visitedStations } from './transfer';
+import type { OnwardLeg, RouteLink } from './transfer';
+import type { CargoId, CargoLeg, City, GameState, Industry, Line, PlayerId, Station, StationKind, VehicleModelId } from './types';
 import type { World } from './world';
 
 export interface Coverage {
@@ -190,17 +192,142 @@ export interface FlowEstimate {
   supplyPerTurn: number;
   amountPerTurn: number;
   revenuePerTurn: number;
+  /** Transshipment: stations where the cargo changes to another line, in order. */
+  via?: string[];
+  /** Transshipment: this line's part of the revenue of the whole journey (by distance). */
+  share?: number;
+  /** The cargo is handed over to this line at its first station by another line. */
+  inbound?: boolean;
+}
+
+const lengths = new WeakMap<World, Map<number, number | null>>();
+
+/** Route length of a line: from the last turn, or (for a new line) over the current network. */
+export function lineLength(world: World, line: Line): number | null {
+  if (line.length !== null && line.length !== undefined) return line.length;
+  let cache = lengths.get(world);
+  if (!cache) lengths.set(world, (cache = new Map()));
+  if (!cache.has(line.id)) {
+    const a = world.stationById.get(line.stations[0]);
+    const b = world.stationById.get(line.stations[1]);
+    cache.set(line.id, a && b ? (findRoute(world, line.owner, line.kind, a.tile, b.tile)?.length ?? null) : null);
+  }
+  return cache.get(line.id)!;
+}
+
+/** Freight lines with vehicles, for the routing of transshipments. */
+export function freightLinks(world: World): RouteLink[] {
+  const running = new Set(world.state.vehicles.map((v) => v.lineId));
+  const links: RouteLink[] = [];
+  for (const line of world.state.lines) {
+    if ((line.carries ?? 'cargo') !== 'cargo' || !running.has(line.id)) continue;
+    const length = lineLength(world, line);
+    if (length !== null) links.push({ line: line.id, owner: line.owner, a: line.stations[0], b: line.stations[1], length });
+  }
+  return links;
+}
+
+/** Freight per turn a line can carry in one direction with its vehicles. */
+function linkCapacity(world: World, link: RouteLink): number {
+  let capacity = 0;
+  for (const v of world.state.vehicles) {
+    if (v.lineId !== link.line) continue;
+    const m = VEHICLES[v.model];
+    const tripTicks = link.length / (m.speed / TICKS_PER_TURN) + LOAD_TICKS;
+    capacity += (m.capacity * TICKS_PER_TURN) / (2 * tripTicks);
+  }
+  return capacity;
+}
+
+interface Inflow {
+  cargo: CargoId;
+  origin: Industry;
+  amount: number;
+  legs: CargoLeg[];
+}
+
+/**
+ * Estimated freight per turn that other lines hand over at a station (transshipment), following feeder
+ * lines back to the industries. `skip` leaves out the line that is being estimated.
+ */
+function inflows(world: World, routing: Routing, skip: (link: RouteLink) => boolean, cov: (s: Station) => Coverage) {
+  const memo = new Map<number, Inflow[] | null>();
+  const at = (station: Station): Inflow[] => {
+    const known = memo.get(station.id);
+    if (known !== undefined) return known ?? []; // null: being worked out (a loop in the network)
+    memo.set(station.id, null);
+    const result: Inflow[] = [];
+    for (const link of routing.links) {
+      if (skip(link)) continue;
+      for (const [xId, yId] of [
+        [link.a, link.b],
+        [link.b, link.a],
+      ]) {
+        const x = world.stationById.get(xId)!;
+        const y = world.stationById.get(yId)!;
+        /** Is cargo that has been at `seen` (and now rides from x to y) handed over at y to this station? */
+        const handedHere = (c: CargoId, seen: Set<number>) =>
+          !seen.has(y.id) && !routing.accepts(y).has(c) && routing.handover(y, c, seen)?.id === station.id;
+        const leg: CargoLeg = { player: link.owner, line: link.line, from: x.id, to: y.id, distance: stationDistance(world, x, y) };
+        const flows: Inflow[] = [];
+        for (const ind of cov(x).industries) {
+          const cargo = INDUSTRIES[ind.type].output;
+          if (!handedHere(cargo, new Set([x.id])) || !pickupAllowed(world, ind, link.owner)) continue;
+          flows.push({ cargo, origin: ind, amount: supplyPerTurn(world, ind, x, link.owner), legs: [leg] });
+        }
+        for (const f of at(x)) {
+          const seen = visitedStations(f);
+          seen.add(x.id);
+          if (!handedHere(f.cargo, seen)) continue;
+          flows.push({ ...f, legs: [...f.legs, leg] });
+        }
+        const total = flows.reduce((sum, f) => sum + f.amount, 0);
+        if (total <= 0) continue;
+        const scale = Math.min(1, linkCapacity(world, link) / total);
+        for (const f of flows) result.push({ ...f, amount: f.amount * scale });
+      }
+    }
+    memo.set(station.id, result);
+    return result;
+  };
+  return at;
 }
 
 /**
  * Possible flows between two stations (both directions), ignoring vehicle capacity: freight from
  * industries, or passengers between cities. `player` (the line owner) decides bonus, tolls and access.
+ * Freight also counts when it can be handed over at the other station to a line that takes it further,
+ * or when other lines hand it over at the first station (transshipment). `length`: route length of the line.
  */
-export function lineFlows(world: World, a: Station, b: Station, carries: Carries = 'cargo', player?: PlayerId): FlowEstimate[] {
+export function lineFlows(
+  world: World,
+  a: Station,
+  b: Station,
+  carries: Carries = 'cargo',
+  player?: PlayerId,
+  length?: number,
+): FlowEstimate[] {
   const flows: FlowEstimate[] = [];
   const covA = stationCoverage(world, a);
   const covB = stationCoverage(world, b);
   const bonus = player && hqBonusApplies(world, player, [a.tile, b.tile]) ? 1 + HQ_BONUS.bonus : 1;
+  const coverage = new Map<number, Coverage>([
+    [a.id, covA],
+    [b.id, covB],
+  ]);
+  const cov = (s: Station) => coverage.get(s.id) ?? coverage.set(s.id, stationCoverage(world, s)).get(s.id)!;
+  // Transshipment: the running freight lines of the player and allies, plus this line.
+  let routing: Routing | null = null;
+  let inflowAt: ((s: Station) => Inflow[]) | null = null;
+  if (carries === 'cargo' && player) {
+    const links = freightLinks(world);
+    const isThisLine = (l: RouteLink) => l.owner === player && ((l.a === a.id && l.b === b.id) || (l.a === b.id && l.b === a.id));
+    if (!links.some(isThisLine)) {
+      links.push({ line: -1, owner: player, a: a.id, b: b.id, length: length ?? stationDistance(world, a, b) * 1.25 });
+    }
+    routing = new Routing(world, player, links, (s) => cov(s).accepts);
+    inflowAt = inflows(world, routing, isThisLine, cov);
+  }
   const pairs: [Station, Coverage, Station, Coverage, 0 | 1][] = [
     [a, covA, b, covB, 0],
     [b, covB, a, covA, 1],
@@ -228,28 +355,57 @@ export function lineFlows(world: World, a: Station, b: Station, carries: Carries
       }
       continue;
     }
-    for (const ind of srcCov.industries) {
+    const here = stationDistance(world, src, dst);
+    /** A flow of freight from an industry over this line, to a customer at `end` (after the onward legs). */
+    const freight = (ind: Industry, end: Station, before: number[], after: OnwardLeg[], extra: Partial<FlowEstimate>) => {
       const cargo = INDUSTRIES[ind.type].output;
-      if (!dstCov.accepts.has(cargo)) continue;
-      const consumer = findConsumer(world, dstCov, dst.tile, cargo);
-      if (!consumer) continue;
+      const consumer = findConsumer(world, cov(end), end.tile, cargo);
+      if (!consumer) return;
       const [ox, oy] = industryCenter(ind);
       const distance = euclid(ox, oy, consumer.x, consumer.y);
       const toll = player ? tollRate(ind, player) : 0;
       const excludedBy = player && !pickupAllowed(world, ind, player) ? majorityHolder(ind) : null;
+      const legs = [...before, here, ...after.map((l) => stationDistance(world, l.from, l.to))];
+      const share = legs.length > 1 ? here / legs.reduce((sum, d) => sum + d, 0) : 1;
       flows.push({
         cargo,
         direction,
         origin: { id: ind.id, name: ind.name },
         consumer,
         distance,
-        unitRevenue: revenueFor(cargo, 1, distance, cargoPrice(world.state, cargo)) * bonus * (1 - toll),
+        unitRevenue: revenueFor(cargo, 1, distance, cargoPrice(world.state, cargo)) * bonus * (1 - toll) * share,
         toll,
         excludedBy,
-        supplyPerTurn: supplyPerTurn(world, ind, src, player),
+        supplyPerTurn: 0,
         amountPerTurn: 0,
         revenuePerTurn: 0,
+        ...(legs.length > 1 ? { share, via: [...(extra.inbound ? [src.name] : []), ...after.map((l) => l.from.name)] } : {}),
+        ...extra,
       });
+    };
+    for (const ind of srcCov.industries) {
+      const cargo = INDUSTRIES[ind.type].output;
+      const supply = supplyPerTurn(world, ind, src, player);
+      if (dstCov.accepts.has(cargo)) {
+        freight(ind, dst, [], [], { supplyPerTurn: supply });
+        continue;
+      }
+      // Handed over at the other station to a line that takes it further.
+      const onward = routing?.onward(dst, cargo, new Set([src.id]));
+      if (onward) freight(ind, onward.end, [], onward.legs, { supplyPerTurn: supply });
+    }
+    // Handed over at this station by other lines.
+    for (const f of inflowAt?.(src) ?? []) {
+      const seen = visitedStations(f);
+      seen.add(src.id);
+      if (seen.has(dst.id) || !routing) continue;
+      const before = f.legs.map((l) => l.distance);
+      if (dstCov.accepts.has(f.cargo)) {
+        freight(f.origin, dst, before, [], { supplyPerTurn: f.amount, inbound: true });
+        continue;
+      }
+      const onward = routing.onward(dst, f.cargo, seen);
+      if (onward) freight(f.origin, onward.end, before, onward.legs, { supplyPerTurn: f.amount, inbound: true });
     }
   }
   return flows;
@@ -296,7 +452,7 @@ export function estimateLine(
   const roundTripTicks = 2 * tripTicks;
   const tripsPerTurn = TICKS_PER_TURN / roundTripTicks;
   const capacityPerTurn = tripsPerTurn * m.capacity * count;
-  const flows = lineFlows(world, a, b, m.carries, player);
+  const flows = lineFlows(world, a, b, m.carries, player, length);
   for (const direction of [0, 1] as const) {
     const dirFlows = flows.filter((f) => f.direction === direction);
     const supply = dirFlows.reduce((s, f) => s + f.supplyPerTurn, 0);

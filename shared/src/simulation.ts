@@ -1,5 +1,6 @@
 // Economic simulation of one turn: production, loading, driving, delivering and upkeep.
 // Vehicles move at their own speed; revenue is only earned when a vehicle arrives at the other station.
+// Freight without a customer at that station can be handed over to another line (see transfer.ts).
 import { majorityHolder, tollsFor } from './auctions';
 import {
   CITY_STOCK_TURNS,
@@ -28,7 +29,9 @@ import type { Consumer, Coverage } from './economy';
 import { euclid, tileX, tileY } from './geometry';
 import { findRoute, pointOnRoute } from './pathfind';
 import type { Route } from './pathfind';
-import type { CargoAmounts, CargoId, CargoLot, Delivery, Finance, Line, PlayerId, Station, TurnReport, Vehicle } from './types';
+import { FREIGHT, Routing, routingKey, stationDistance, visitedStations } from './transfer';
+import type { RouteLink } from './transfer';
+import type { CargoAmounts, CargoId, CargoLeg, CargoLot, Delivery, Finance, Industry, Line, PlayerId, Station, TurnReport, Vehicle } from './types';
 import type { World } from './world';
 
 /** Integer part of `total` produced during tick `t`; the parts add up to exactly `total` per turn. */
@@ -42,10 +45,14 @@ function cargoOnBoard(v: Vehicle): number {
   return v.cargo.reduce((s, l) => s + l.amount, 0);
 }
 
-function addLot(lots: CargoLot[], cargo: CargoId, amount: number, origin: number): void {
-  const lot = lots.find((l) => l.cargo === cargo && l.origin === origin);
+/** Lots with the same journey so far can be merged. */
+const journey = (legs: CargoLeg[] | undefined): string => (legs ?? []).map((l) => `${l.line}>${l.to}`).join(',');
+
+function addLot(lots: CargoLot[], cargo: CargoId, amount: number, origin: number, legs?: CargoLeg[]): void {
+  const key = journey(legs);
+  const lot = lots.find((l) => l.cargo === cargo && l.origin === origin && journey(l.legs) === key);
   if (lot) lot.amount += amount;
-  else lots.push({ cargo, amount, origin });
+  else lots.push(legs?.length ? { cargo, amount, origin, legs } : { cargo, amount, origin });
 }
 
 function waitingAmount(station: Station, cargo: CargoId): number {
@@ -74,6 +81,21 @@ export function simulateTurn(world: World, report: TurnReport, fin: Record<Playe
     line.stats = { trips: 0, revenue: 0, delivered: {} };
   }
 
+  // Transshipment: where freight can go on over the running freight lines of a player and their allies.
+  const freightLinks: RouteLink[] = [];
+  for (const line of state.lines) {
+    const route = routes.get(line.id);
+    if ((line.carries ?? 'cargo') !== 'cargo' || !route || !vehiclesByLine.get(line.id)?.length) continue;
+    freightLinks.push({ line: line.id, owner: line.owner, a: line.stations[0], b: line.stations[1], length: route.length });
+  }
+  const routings = new Map<string, Routing>();
+  const routingFor = (player: PlayerId): Routing => {
+    const key = routingKey(world, player);
+    let r = routings.get(key);
+    if (!r) routings.set(key, (r = new Routing(world, player, freightLinks, (st) => coverage.get(st.id)?.accepts ?? new Set())));
+    return r;
+  };
+
   // Each station collects what the other end of one of its active lines accepts: freight for freight
   // lines, passengers for passenger lines that lead to another city. Per cargo: the owners of those lines.
   const wants = new Map<number, Map<CargoId, Set<PlayerId>>>();
@@ -95,8 +117,16 @@ export function simulateTurn(world: World, report: TurnReport, fin: Record<Playe
       if (leadsToOtherCity(covA, covB)) want(a, 'passengers', line.owner);
       if (leadsToOtherCity(covB, covA)) want(b, 'passengers', line.owner);
     } else {
-      for (const c of covB.accepts) want(a, c, line.owner);
-      for (const c of covA.accepts) want(b, c, line.owner);
+      // What a customer at the other end takes, or what can be handed over there to a line that takes it further.
+      const routing = routingFor(line.owner);
+      const stA = world.stationById.get(a)!;
+      const stB = world.stationById.get(b)!;
+      const fromA = new Set([a]);
+      const fromB = new Set([b]);
+      for (const c of FREIGHT) {
+        if (covB.accepts.has(c) || routing.arrive(stB, c, fromA) < Infinity) want(a, c, line.owner);
+        if (covA.accepts.has(c) || routing.arrive(stA, c, fromB) < Infinity) want(b, c, line.owner);
+      }
     }
   }
   // An industry whose majority shareholder decides who may load there only supplies stations of
@@ -201,6 +231,24 @@ export function simulateTurn(world: World, report: TurnReport, fin: Record<Playe
     }
   };
 
+  /** May a freight vehicle from `here` to `there` take this lot? */
+  const mayLoad = (v: Vehicle, lot: CargoLot, here: Station, there: Station, cov: Coverage): boolean => {
+    if (lot.cargo === 'passengers') return false;
+    const ind = world.industryById.get(lot.origin);
+    const holder = ind ? majorityHolder(ind) : null;
+    if (holder && !world.canUse([holder], v.owner)) return false;
+    const legs = lot.legs ?? [];
+    // Handed over by another line: only for the same company or an ally.
+    if (legs.length && !world.canUse([legs[legs.length - 1].player], v.owner)) return false;
+    // Never back to a station where the cargo has been.
+    const seen = visitedStations(lot);
+    seen.add(here.id);
+    if (seen.has(there.id)) return false;
+    if (cov.accepts.has(lot.cargo)) return true;
+    // Transshipment at the other end: only when a line takes it further from there towards a customer.
+    return routingFor(v.owner).arrive(there, lot.cargo, seen) < Infinity;
+  };
+
   const load = (v: Vehicle, here: Station, there: Station) => {
     const cov = coverage.get(there.id);
     if (!cov) return;
@@ -211,16 +259,13 @@ export function simulateTurn(world: World, report: TurnReport, fin: Record<Playe
       if (lot.amount <= 0) continue;
       if (passengers) {
         if (lot.cargo !== 'passengers' || !cov.cities.some((c) => c.id !== lot.origin)) continue;
-      } else {
-        if (lot.cargo === 'passengers' || !cov.accepts.has(lot.cargo)) continue;
-        const ind = world.industryById.get(lot.origin);
-        const holder = ind ? majorityHolder(ind) : null;
-        if (holder && !world.canUse([holder], v.owner)) continue;
+      } else if (!mayLoad(v, lot, here, there, cov)) {
+        continue;
       }
       const take = Math.min(free, lot.amount);
       lot.amount -= take;
       free -= take;
-      addLot(v.cargo, lot.cargo, take, lot.origin);
+      addLot(v.cargo, lot.cargo, take, lot.origin, lot.legs);
     }
     here.waiting = here.waiting.filter((l) => l.amount > 0);
   };
@@ -232,6 +277,67 @@ export function simulateTurn(world: World, report: TurnReport, fin: Record<Playe
       return !!a && !!b && hqBonusApplies(world, l.owner, [a.tile, b.tile]);
     }).map((l) => l.id),
   );
+
+  const delivery = (player: PlayerId, lineId: number, cargo: CargoId): Delivery => {
+    const key = `${player}:${lineId}:${cargo}`;
+    let d = deliveries.get(key);
+    if (!d) deliveries.set(key, (d = { player, lineId, cargo, amount: 0, revenue: 0, bonus: 0, toll: 0, trips: 0 }));
+    return d;
+  };
+
+  /**
+   * Pays one leg of a journey its part of the revenue: plus the headquarters bonus of that line, minus what
+   * goes to the shareholders of the industry the cargo came from. Returns what the player keeps.
+   */
+  const pay = (player: PlayerId, lineId: number, cargo: CargoId, gross: number, originIndustry: Industry | undefined): number => {
+    const owner = state.players.find((p) => p.id === player);
+    if (!owner) return 0;
+    const base = Math.round(gross);
+    const bonus = bonusLines.has(lineId) ? Math.round(base * HQ_BONUS.bonus) : 0;
+    const revenue = base + bonus;
+    let toll = 0;
+    for (const { holder, part } of originIndustry ? tollsFor(originIndustry, player) : []) {
+      const shareholder = state.players.find((p) => p.id === holder);
+      const amount = Math.round(revenue * part);
+      if (!shareholder || amount <= 0) continue;
+      shareholder.money += amount;
+      if (fin[holder]) fin[holder].dividends += amount;
+      toll += amount;
+    }
+    const net = revenue - toll;
+    owner.money += net;
+    if (fin[player]) {
+      fin[player].revenue += revenue;
+      fin[player].tolls += toll;
+    }
+    const line = world.lineById.get(lineId);
+    if (line) line.stats.revenue += net;
+    const d = delivery(player, lineId, cargo);
+    d.revenue += revenue;
+    d.bonus += bonus;
+    d.toll += toll;
+    return net;
+  };
+
+  /** Freight without a customer here: hand it over to a line that takes it further (or it is lost). */
+  const transfer = (v: Vehicle, lot: CargoLot, station: Station, line: Line, t: number) => {
+    const from = world.stationById.get(line.stations[v.dir === 0 ? 1 : 0])!;
+    const seen = visitedStations(lot);
+    seen.add(from.id);
+    const target = routingFor(v.owner).handover(station, lot.cargo, seen);
+    if (!target) return;
+    const leg: CargoLeg = { player: v.owner, line: line.id, from: from.id, to: station.id, distance: round2(stationDistance(world, from, station)) };
+    const amount = Math.min(lot.amount, STATION_WAITING_CAP - waitingAmount(target, lot.cargo));
+    if (amount <= 0) return;
+    addLot(target.waiting, lot.cargo, amount, lot.origin, [...(lot.legs ?? []), leg]);
+    const moved = (line.stats.transferred ??= {});
+    moved[lot.cargo] = (moved[lot.cargo] ?? 0) + amount;
+    const d = delivery(v.owner, line.id, lot.cargo);
+    d.transferred = (d.transferred ?? 0) + amount;
+    d.trips += 1;
+    const [x, y] = [tileX(world.grid, station.tile) + 0.5, tileY(world.grid, station.tile) + 0.5];
+    report.replay.events.push({ tick: t, vehicle: v.id, player: v.owner, x, y, cargo: lot.cargo, amount, revenue: 0, transfer: true });
+  };
 
   const unload = (v: Vehicle, station: Station, line: Line, t: number) => {
     const cov = coverage.get(station.id);
@@ -247,7 +353,10 @@ export function simulateTurn(world: World, report: TurnReport, fin: Record<Playe
       const consumer: Consumer | null = isPassengers
         ? findPassengerDestination(world, cov, station.tile, lot.origin)
         : findConsumer(world, cov, station.tile, lot.cargo);
-      if (!consumer) continue;
+      if (!consumer) {
+        if (!isPassengers) transfer(v, lot, station, line, t);
+        continue;
+      }
       const originCity = isPassengers ? world.cityById.get(lot.origin) : undefined;
       const originIndustry = isPassengers ? undefined : world.industryById.get(lot.origin);
       const [ox, oy] = originCity ? cityCenter(originCity) : originIndustry ? industryCenter(originIndustry) : [consumer.x, consumer.y];
@@ -271,39 +380,28 @@ export function simulateTurn(world: World, report: TurnReport, fin: Record<Playe
         ind.stats.received[lot.cargo] = (ind.stats.received[lot.cargo] ?? 0) + lot.amount;
         gross = revenueFor(lot.cargo, lot.amount, distance, price);
       }
-      const base = Math.round(gross);
-      const bonus = bonusLines.has(line.id) ? Math.round(base * HQ_BONUS.bonus) : 0;
-      const revenue = base + bonus;
-      // Shareholders of the industry the cargo came from get their part.
-      let toll = 0;
-      for (const { holder, part } of originIndustry ? tollsFor(originIndustry, owner.id) : []) {
-        const shareholder = state.players.find((p) => p.id === holder);
-        const amount = Math.round(revenue * part);
-        if (!shareholder || amount <= 0) continue;
-        shareholder.money += amount;
-        if (fin[holder]) fin[holder].dividends += amount;
-        toll += amount;
-      }
-      const net = revenue - toll;
-      owner.money += net;
-      if (fin[owner.id]) {
-        fin[owner.id].revenue += revenue;
-        fin[owner.id].tolls += toll;
-      }
-      v.stats.revenue += net;
-      v.stats.revenueTotal += net;
-      line.stats.revenue += net;
+      // Every leg of the journey gets its part of the revenue, by distance (one leg without transshipment).
+      const from = world.stationById.get(line.stations[v.dir === 0 ? 1 : 0]);
+      const legs = [
+        ...(lot.legs ?? []),
+        { player: owner.id, line: line.id, distance: from ? stationDistance(world, from, station) : 1 },
+      ];
+      const total = legs.reduce((sum, leg) => sum + leg.distance, 0);
+      let earned = 0;
+      legs.forEach((leg, i) => {
+        const net = pay(leg.player, leg.line, lot.cargo, legs.length === 1 ? gross : (gross * leg.distance) / total, originIndustry);
+        earned += net;
+        if (i === legs.length - 1) {
+          v.stats.revenue += net;
+          v.stats.revenueTotal += net;
+        }
+      });
       line.stats.delivered[lot.cargo] = (line.stats.delivered[lot.cargo] ?? 0) + lot.amount;
       supply[lot.cargo] = (supply[lot.cargo] ?? 0) + lot.amount;
-      const key = `${owner.id}:${line.id}:${lot.cargo}`;
-      const d = deliveries.get(key) ?? { player: owner.id, lineId: line.id, cargo: lot.cargo, amount: 0, revenue: 0, bonus: 0, toll: 0, trips: 0 };
+      const d = delivery(owner.id, line.id, lot.cargo);
       d.amount += lot.amount;
-      d.revenue += revenue;
-      d.bonus += bonus;
-      d.toll += toll;
       d.trips += 1;
-      deliveries.set(key, d);
-      report.replay.events.push({ tick: t, vehicle: v.id, player: owner.id, x: sx, y: sy, cargo: lot.cargo, amount: lot.amount, revenue: net });
+      report.replay.events.push({ tick: t, vehicle: v.id, player: owner.id, x: sx, y: sy, cargo: lot.cargo, amount: lot.amount, revenue: earned });
     }
     v.cargo = [];
   };

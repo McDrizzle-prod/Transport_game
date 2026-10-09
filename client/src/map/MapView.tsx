@@ -1,8 +1,20 @@
 // Canvas map: camera, touch/mouse input and the render loop. Lives outside React's render cycle.
 import { useEffect, useRef } from 'react';
-import { HQ_BONUS, STATIONS, VEHICLES, checkStationTile, coverageAt, findRoute, hqError, majorityHolder, pointOnRoute } from '@transport/shared';
+import {
+  CARGO,
+  HQ_BONUS,
+  STATIONS,
+  VEHICLES,
+  checkStationTile,
+  coverageAt,
+  findRoute,
+  hqError,
+  majorityHolder,
+  pointOnRoute,
+  transferPartners,
+} from '@transport/shared';
 import type { Action, Edge, GameState, Route, SlotResult, Station, TurnReport, World } from '@transport/shared';
-import { money } from '../format';
+import { money, num } from '../format';
 import { groupPath, slotGroups, slotRange } from '../state/groups';
 import { FLASH_MS, useStore } from '../state/store';
 import type { GameStore, UiState } from '../state/store';
@@ -57,6 +69,7 @@ class MapController {
   private fitted = false;
   private insets: unknown = null;
   private flashWasOn = false;
+  private queuedCache: { queue: unknown; value: Scene['queued'] } | null = null;
 
   constructor(canvas: HTMLCanvasElement, store: GameStore) {
     this.canvas = canvas;
@@ -280,7 +293,7 @@ class MapController {
       else this.store.select(null);
     } else if (e.key === 'Backspace' && s.tool.kind === 'route' && s.tool.path.length > 0) {
       this.store.undoRoutePoint();
-    } else if (e.key === 'Enter' && s.tool.kind === 'route' && s.tool.path.length > 1) {
+    } else if (e.key === 'Enter' && s.tool.kind === 'route' && s.tool.path.length > 1 && !s.tool.adding) {
       this.store.confirmRoute();
     } else if (e.key === '+' || e.key === '=') {
       this.flyTo({ ...this.cam, zoom: this.cam.zoom * 1.4 });
@@ -394,6 +407,15 @@ class MapController {
       if (holder && me && !world.canUse([holder], me)) locked.add(ind.id);
     }
     const auctions = new Set(state.auctions.filter((a) => a.status === 'open').map((a) => a.industry));
+    // Stations (also planned ones) within reach of each other: freight can be handed over between them.
+    const transferLinks: [number, number][] = [];
+    if (me) {
+      const planned = preview?.world ?? world;
+      for (const st of planned.state.stations) {
+        if (!planned.canUse(st.owners, me)) continue;
+        for (const other of transferPartners(planned, st, me)) if (other.id > st.id) transferLinks.push([st.tile, other.tile]);
+      }
+    }
     const flash = s.flash && now < s.flash.until ? { tile: s.flash.tile, t: 1 - (s.flash.until - now) / FLASH_MS } : null;
     return {
       map,
@@ -418,7 +440,23 @@ class MapController {
       locked,
       auctions,
       flash,
+      transferLinks,
+      queued: replay ? { edges: [], stations: [] } : this.queuedOnMap(s, me),
     };
+  }
+
+  /** The queue for the next turns, to draw faintly on the map. */
+  private queuedOnMap(s: UiState, me: string | null): Scene['queued'] {
+    if (this.queuedCache?.queue === s.queue) return this.queuedCache.value;
+    const edges: Edge[] = [];
+    const stations: number[] = [];
+    for (const a of s.queue) {
+      if (a.type === 'build') edges.push({ kind: a.kind, a: a.path[0], b: a.path[1], owners: me ? [me] : [], turn: 0, slot: 0 });
+      else if (a.type === 'station') stations.push(a.tile);
+    }
+    const value = { edges, stations };
+    this.queuedCache = { queue: s.queue, value };
+    return value;
   }
 
   private toolOverlay(s: UiState, me: string | null): ToolOverlay | null {
@@ -439,8 +477,8 @@ class MapController {
           ghost: this.store.routeGhost(),
           path: plan?.path ?? null,
           blocked: (plan?.plan?.blocked ?? []).map((b) => b.tile),
-          label: ok && plan?.plan ? `${actions} acties · ${money(plan.plan.cost)}${actions > free ? ` · ${free} vrij` : ''}` : null,
-          ok: ok && actions <= free,
+          label: ok && plan?.plan ? `${actions} acties · ${money(plan.plan.cost)}${actions > free ? ` · ${actions - free} naar wachtrij` : ''}` : null,
+          ok: ok && actions - free <= this.store.queueRoom(),
         };
       }
       case 'station': {
@@ -588,7 +626,13 @@ class MapController {
     const tick = Math.min(ticks, (elapsed - buildMs) / TICK_MS);
     const texts: FloatingText[] = report.replay.events
       .filter((ev) => ev.tick <= tick && tick - ev.tick < 7)
-      .map((ev) => ({ x: ev.x, y: ev.y, text: `+${money(ev.revenue)}`, color: lighten(colors.get(ev.player) ?? '#fff'), t: (tick - ev.tick) / 7 }));
+      .map((ev) => ({
+        x: ev.x,
+        y: ev.y,
+        text: ev.transfer ? `⇄ ${num(ev.amount)} ${CARGO[ev.cargo].icon}` : `+${money(ev.revenue)}`,
+        color: ev.transfer ? '#d6ecff' : lighten(colors.get(ev.player) ?? '#fff'),
+        t: (tick - ev.tick) / 7,
+      }));
     return {
       view: { turn: report.turn, slot: 99, activeSlot: null, lostTiles: [], sharedTiles: [], label: `Beurt ${report.turn} · voertuigen rijden (${Math.floor(tick)}/${ticks})` },
       vehicles: report.replay.vehicles.map((rv) => sprite(rv, tick)),

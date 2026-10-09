@@ -48,17 +48,33 @@ voertuig-acties. De volgorde is dus belangrijk:
 **Zo plan je een route:** kies Weg, Spoor of Kanaal en tik op punt A (het begin) en daarna op punt B.
 
 - De route loopt in een **rechte lijn** van A naar B (schuine stukken tellen als één stuk), alleen om een
-  obstakel heen als er iets in de weg ligt; dan meldt het spel dat.
-- Je ziet eerst een **voorbeeld**: de route, de punten A en B, het aantal acties en de kosten. Met een muis zie je
-  bovendien gestippeld waar het volgende stuk komt.
-- Wil je een bocht? Tik op meer punten: de route loopt recht van punt naar punt. Tik op de route zelf om terug te
-  gaan naar dat punt, of op ↶ om het laatste punt weg te halen.
-- Klopt de ligging? Tik op het **groene vinkje ✓**. Pas dan komen de stukken in je vrije actieslots (vink vooraf aan
-  of je bij A en/of B een station wilt; elk station is een extra actie).
+  obstakel heen als er iets in de weg ligt; dan meldt het spel dat. Met een muis zie je vooraf gestippeld waar het
+  volgende stuk komt.
+- Na punt B **staat de route vast**: je ziet de route, de punten A en B, het aantal acties en de kosten, en tikken op
+  de kaart verandert niets meer. Zo kan een tik net naast het vinkje geen extra spoor opleveren.
+- Wil je een bocht? Tik op **＋** en dan op het volgende punt: de route loopt recht van punt naar punt. Met ＋ actief
+  kun je ook op de route zelf tikken om terug te gaan naar dat punt. ↶ haalt het laatste punt weg.
+- Klopt de ligging? Tik op het **groene vinkje ✓**. Pas dan komen de stukken in je actieslots (vink vooraf aan of je
+  bij A en/of B een station wilt; elk station is een extra actie).
 
-Past de route niet helemaal, dan worden de eerste stukken gepland; de rest bouw je volgende beurt verder vanaf het
-eind. In de lijst met acties staat een route als één regel (bijv. "slot 2–9"), die je kunt openklappen of in één
-keer kunt verwijderen.
+In de lijst met acties staat een route als één regel (bijv. "slot 2–9"), die je kunt openklappen of in één keer kunt
+verwijderen.
+
+### Wachtrij voor de volgende beurten
+
+Past een route (of een andere actie) niet meer in de vrije slots van deze beurt, dan gaat de rest in de
+**wachtrij**. Na elke uitgevoerde beurt vullen de eerste acties uit de wachtrij vanzelf de slots van de nieuwe
+beurt, ook als je zelf niet online bent. Een spoor van 20 stukken met 5 acties per beurt wordt zo in 4 beurten
+gebouwd: 5 stukken nu, de andere 15 in de wachtrij (5 per beurt).
+
+- De wachtrij staat in het tabblad Acties onder je slots. Per regel zie je in welke beurt die acties aan de beurt
+  zijn (bijv. "B8–10"), wat ze ongeveer kosten en of er inmiddels iets in de weg ligt (⚠, bijv. een tegel die een
+  ander al heeft).
+- Je kunt de volgorde veranderen (▲▼, per route of actie), routes per stuk bekijken en acties of hele routes
+  weghalen. Heb je deze beurt nog vrije slots, dan haal je met **⤴ naar deze beurt** de eerste acties naar voren.
+- Op de kaart staat de wachtrij als dunne stippellijn in je kleur.
+- Is een actie niet meer mogelijk als hij aan de beurt is, dan mislukt hij gewoon (en kost hij niets); het rapport
+  zegt waarom.
 
 ## Conflicten
 
@@ -113,6 +129,30 @@ Een laadpunt of treinstation is verbonden met je weg of spoor als het erop staat
 schuin); een laadpunt naast een stadsstraat is verbonden met de straten van die stad. Het station-gereedschap laat
 bij het kiezen van een plek zien of dat zo is. Havens liggen altijd aan het water en zijn dus altijd bereikbaar.
 
+## Overslag
+
+Vracht mag onderweg overstappen op een andere lijn. Voorbeeld: een vrachtwagen haalt olie op bij een oliebron en
+brengt die naar een laadpunt bij een haven; een schip vaart de olie naar een andere haven; een trein brengt hem van
+een station bij die haven naar de raffinaderij.
+
+- **Binnen bereik**: de stations moeten binnen het bereik van elkaar liggen. Voor een laadpunt en een treinstation
+  is dat direct naast elkaar (1 tegel), bij een haven tot **2 tegels** van de haven. Overstappen op hetzelfde
+  station (bijv. van de ene vrachtwagenlijn op de andere) kan ook. Op de kaart zie je zo'n koppeling als
+  stippellijn met ⇄; de stationsinfo en het station-gereedschap noemen de stations waarmee overslag kan.
+- **Wanneer**: komt vracht aan bij een station waar niemand die vracht wil, dan gaat ze naar het station (dat
+  station zelf of een station binnen bereik) vanwaar een lijn haar het snelst bij een klant brengt. Vracht gaat
+  nooit terug naar een station waar ze al is geweest. Kan ze nergens heen, dan laadt de lijn die vracht ook niet
+  in: je vrachtwagens nemen olie dus pas mee als het schip er ook is.
+- **Van wie**: alleen je eigen lijnen en die van bondgenoten nemen overgeslagen vracht over.
+- **Geld**: de opbrengst wordt berekend zoals altijd (hemelsbrede afstand van de industrie tot de klant) en betaald
+  als de vracht bij de klant aankomt. Elke lijn van de reis krijgt een deel, naar verhouding van de afstand tussen
+  haar twee stations. De hoofdkantoorbonus en de tol aan aandeelhouders gelden per lijn.
+- **Passagiers** reizen altijd rechtstreeks tussen twee steden; zij stappen niet over.
+
+Bij het inzetten van voertuigen rekent het spel de overslag mee: je ziet waar de vracht naartoe gaat (⇄ via welke
+stations), welk deel van de opbrengst deze lijn krijgt en hoeveel vracht andere lijnen aanleveren. In het rapport
+staat per lijn hoeveel er is overgeslagen.
+
 ## Productieketens
 
 | Industrie | Levert | Heeft nodig |
@@ -130,6 +170,9 @@ bij het kiezen van een plek zien of dat zo is. Havens liggen altijd aan het wate
 | Bouwmaterialenfabriek | 🧱 Bouwmaterialen | Steen |
 | Gereedschapsfabriek | 🔧 Gereedschap | Planken |
 | Goederenfabriek | 📦 Goederen | Staal + Planken |
+
+Op de kaart staat onder elke industrie wat erin gaat en wat eruit komt (bijv. 🌾 → 🥫), en bij grondstoffen
+hoeveel er per beurt wordt geproduceerd.
 
 Fabrieken verwerken maximaal 120 eenheden per beurt en produceren alleen als ze grondstoffen krijgen. Wat ze maken
 kan door iedereen met een station ernaast worden opgehaald (tenzij iemand de meerderheid van de aandelen heeft,
@@ -191,6 +234,8 @@ opbrengst = hoeveelheid × basisprijs × marktprijs × afstand  (+ 25% hoofdkant
   extra op, een lange verbinding wel.
 - **basisprijs** per ton per tegel: grondstoffen € 28–36, producten € 48–85 (zie het tabblad Markt), passagiers € 16.
 - Voorbeeld: 20 ton graan (€ 32) over 22 tegels bij marktprijs ×1,00 = 20 × 32 × 22 = **€ 14.080**.
+- Bij **overslag** wordt dit bedrag bij aankomst bij de klant verdeeld over de lijnen van de reis, naar de afstand
+  die elke lijn aflegt (zie Overslag).
 
 Het spel toont deze berekening vooraf bij het inzetten van voertuigen: verwachte vracht per beurt, opbrengst,
 onderhoud, netto per beurt en terugverdientijd (inclusief bonus en tol).

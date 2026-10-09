@@ -199,6 +199,45 @@ describe('API', () => {
     expect((await call('POST', `/api/games/${gameId}/bid`, { auction: 'x', amount: 5 }, token)).status).toBe(409);
   });
 
+  it('keeps actions that do not fit in a queue and puts them in the slots of the next turns', async () => {
+    await start();
+    const host = await call<JoinResponse>('POST', '/api/games', {
+      name: 'Wachtrij',
+      playerName: 'Host',
+      settings: { mapSize: 48, seed: 5, schedule: { mode: 'manual' }, actionSlots: 3 },
+    });
+    const { gameId, token } = host.data;
+    const map = (await call<MapData>('GET', `/api/games/${gameId}/map`)).data;
+    await call('POST', `/api/games/${gameId}/hq`, { tile: freeTiles(map, 1, 1)[0] }, token);
+    await call('POST', `/api/games/${gameId}/start`, {}, token);
+    const station = (tile: number) => ({ type: 'station', kind: 'road', tile });
+    const tiles = freeTiles(map, 8, 3).slice(1);
+    const orders = `/api/games/${gameId}/orders`;
+    const put = (body: unknown) => call<{ error?: string }>('PUT', orders, body, token);
+    expect((await put({ slots: tiles.slice(0, 3).map(station), queue: tiles.slice(3).map(station), ready: false })).status).toBe(200);
+    // Saving only the slots keeps the queue; a broken queue is refused.
+    expect((await put({ slots: tiles.slice(0, 3).map(station), ready: true })).status).toBe(200);
+    expect((await put({ slots: [], queue: [{ type: 'build', kind: 'road', path: [0, 99] }], ready: false })).data.error).toBe('queue_invalid');
+    let view = (await call<ClientView>('GET', `/api/games/${gameId}/view`, undefined, token)).data;
+    expect(view.orders?.queue).toHaveLength(4);
+
+    await call('POST', `/api/games/${gameId}/resolve`, {}, token);
+    view = (await call<ClientView>('GET', `/api/games/${gameId}/view`, undefined, token)).data;
+    expect(view.game.turn).toBe(2);
+    expect(view.game.stations).toHaveLength(3);
+    // The first three queued actions are now this turn's slots, one is left for the turn after.
+    expect(view.orders?.slots).toEqual(tiles.slice(3, 6).map(station));
+    expect(view.orders?.queue).toEqual(tiles.slice(6).map(station));
+    expect(view.orders?.ready).toBe(false);
+
+    await call('POST', `/api/games/${gameId}/resolve`, {}, token);
+    await call('POST', `/api/games/${gameId}/resolve`, {}, token);
+    view = (await call<ClientView>('GET', `/api/games/${gameId}/view`, undefined, token)).data;
+    expect(view.game.stations).toHaveLength(7);
+    expect(view.orders?.slots.every((a) => a === null)).toBe(true);
+    expect(view.orders?.queue).toEqual([]);
+  });
+
   it('lets a player continue on another device with name + PIN', async () => {
     await start();
     const host = await call<JoinResponse>('POST', '/api/games', { name: 'Pin', playerName: 'Anna', pin: '4321', settings: { mapSize: 48, seed: 2 } });

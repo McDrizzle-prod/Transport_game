@@ -32,6 +32,11 @@ export function HelpTab() {
         </li>
         <li>Een station of haven bouwen kost 1 actie, voertuigen inzetten of verkopen ook.</li>
         <li>
+          Past iets niet meer in deze beurt, dan gaat het in de <strong>wachtrij</strong>: na elke uitgevoerde beurt vullen de eerste acties uit
+          de wachtrij vanzelf je slots. Een spoor van 20 stukken met {slots} acties per beurt wordt zo in {Math.ceil(20 / slots)} beurten gebouwd.
+          In het tabblad Acties zie je per actie in welke beurt hij aan de beurt is; je kunt de volgorde veranderen en acties weghalen.
+        </li>
+        <li>
           <strong>Lenen, aflossen en bieden</strong> op aandelen kosten géén actie (tabblad Beurs).
         </li>
       </ul>
@@ -39,8 +44,8 @@ export function HelpTab() {
       <ul>
         <li>
           Kies Weg, Spoor of Kanaal, tik op punt A en daarna op punt B: je ziet hoe de route in een rechte lijn gaat lopen (alleen om obstakels
-          heen). Tik op meer punten voor bochten, op ↶ om een punt terug te nemen. Klopt het? Tik op het groene vinkje ✓; dan komt de route in je
-          vrije slots.
+          heen). Daarna staat de route vast: per ongeluk naast de knop tikken verandert niets. Een bocht nodig? Tik op ＋ en dan op het volgende
+          punt; ↶ neemt een punt terug. Klopt het? Tik op het groene vinkje ✓; dan komt de route in je vrije slots en de rest in de wachtrij.
         </li>
         <li>
           {TRANSPORT.road.name} ({money(TRANSPORT.road.edgeCost)}), {TRANSPORT.rail.name.toLowerCase()} ({money(TRANSPORT.rail.edgeCost)}) en{' '}
@@ -53,6 +58,26 @@ export function HelpTab() {
         </li>
         <li>Een laadpunt of treinstation hoort op of direct naast je weg of spoor te staan; dan is het daarmee verbonden.</li>
         <li>Stadsstraten zijn openbaar: vrachtwagens en bussen van iedereen mogen erover. Schepen varen gratis over open water.</li>
+      </ul>
+      <h4>Overslag</h4>
+      <ul>
+        <li>
+          Vracht mag onderweg overstappen op een andere lijn. Voorbeeld: een vrachtwagen brengt olie van de oliebron naar een{' '}
+          {STATIONS.road.name.toLowerCase()} bij de haven, een schip vaart het naar een andere haven en een trein brengt het van daar naar de
+          raffinaderij.
+        </li>
+        <li>
+          Dan moeten de stations <strong>binnen bereik van elkaar</strong> liggen: direct naast elkaar, of tot {STATIONS.water.radius} tegels van
+          een haven. Op de kaart zie je zo'n koppeling als stippellijn met ⇄. Op hetzelfde station overstappen kan ook.
+        </li>
+        <li>
+          Vracht stapt alleen over als er bij het station geen klant voor is en een lijn van jou (of een bondgenoot) haar dichter bij een klant
+          brengt. Passagiers reizen altijd rechtstreeks.
+        </li>
+        <li>
+          Het geld komt binnen als de vracht bij de klant is: de hemelsbrede afstand van herkomst tot klant, verdeeld over de lijnen naar de
+          afstand die elke lijn aflegt.
+        </li>
       </ul>
       <h4>Conflicten</h4>
       <ul>

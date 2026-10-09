@@ -10,6 +10,8 @@ export const MAX_ACTION_SLOTS = 20;
 export const TICKS_PER_TURN = 40;
 /** Longest route the route tool plans in one go (it is then built one segment per action). */
 export const MAX_ROUTE_EDGES = 64;
+/** Actions a player can keep in the queue for the next turns. */
+export const MAX_QUEUED_ACTIONS = 200;
 export const MAX_VEHICLES_PER_ACTION = 5;
 /** Part of the purchase price you get back when selling a vehicle. */
 export const VEHICLE_RESALE = 0.5;

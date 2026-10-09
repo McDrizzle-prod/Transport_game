@@ -7,6 +7,7 @@ export * from './world';
 export * from './pathfind';
 export * from './construction';
 export * from './economy';
+export * from './transfer';
 export * from './simulation';
 export * from './market';
 export * from './resolve';

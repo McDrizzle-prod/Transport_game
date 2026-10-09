@@ -12,7 +12,7 @@ wint het laagste slot; kozen ze hetzelfde slot, dan delen ze de tegel.
 
 Dit is een **proof of concept**: speelbaar in de browser en installeerbaar als app op telefoon/tablet (PWA).
 
-| Plannen: een geplande route in de slots (hier 2–9) | Uitvoering per slot: ○ gedeelde tegel, ✖ verloren tegel |
+| Plannen: een geplande route in de slots (hier 1–6) | Uitvoering per slot: ○ gedeelde tegel, ✖ verloren tegel |
 | --- | --- |
 | ![Plannen](docs/img/plannen.jpg) | ![Uitvoering](docs/img/uitvoering-conflict.jpg) |
 
@@ -27,6 +27,10 @@ Dit is een **proof of concept**: speelbaar in de browser en installeerbaar als a
 | Een vriend opent de link: meteen meedoen | Verder spelen op een ander apparaat: naam + pincode |
 | --- | --- |
 | ![Meedoen](docs/img/meedoen.jpg) | ![Verder spelen](docs/img/verder-spelen.jpg) |
+
+| Wachtrij: wat niet in deze beurt past, volgt vanzelf | Overslag: vrachtwagen → haven → schip → trein (⇄) |
+| --- | --- |
+| ![Wachtrij](docs/img/wachtrij.jpg) | ![Overslag](docs/img/overslag.jpg) |
 
 ## Snel starten
 
@@ -109,10 +113,13 @@ Goed om te weten:
 - Actieslots per beurt (standaard 5, instelbaar 3–20), vrij te vullen en te herschikken; acties worden op de
   server bewaard en kunnen tot de uitvoering worden aangepast. Uitvoering op een vast tijdstip per dag (met
   tijdzone), elke N minuten of handmatig door de host; optioneel eerder zodra iedereen "klaar" is.
-- Acties (elk 1 slot): **een stuk weg, spoor of kanaal** (klik op het begin; de route volgt je muis, of tik op het
-  eind voor een rechte lijn; de stukken komen meteen in je vrije slots), **station bouwen** (laadpunt, treinstation,
-  haven; bereik 1 tegel, haven 2; een station naast je weg of spoor is ermee verbonden), **voertuigen inzetten**
-  tussen twee stations, **voertuigen verkopen**.
+- Acties (elk 1 slot): **een stuk weg, spoor of kanaal** (tik op punt A en punt B, bekijk het voorbeeld en tik op
+  het groene vinkje; na B staat de route vast, met ＋ maak je een bocht), **station bouwen** (laadpunt,
+  treinstation, haven; bereik 1 tegel, haven 2; een station naast je weg of spoor is ermee verbonden),
+  **voertuigen inzetten** tussen twee stations, **voertuigen verkopen**.
+- **Wachtrij**: wat niet meer in de slots van deze beurt past (bv. de rest van een lang spoor), wordt op de server
+  bewaard en vult na elke beurt vanzelf de slots van de volgende beurt. In het tabblad Acties zie je per actie in
+  welke beurt hij aan de beurt is en kun je de volgorde aanpassen of acties weghalen.
 - **Steden** vragen producten én hebben passagiers die naar andere steden willen (bus, passagierstrein, veerboot).
 - Conflictregels per tegel: laagste slot wint, zelfde slot = gedeelde tegel (beide spelers mogen er gebruik van
   maken). Zichtbaar in het rapport en in de afspeelfunctie.
@@ -120,6 +127,11 @@ Goed om te weten:
   rails), kanalen, bruggen; elke verbinding heeft de kleur van de eigenaar als rand. Geplande acties staan
   gestippeld op de kaart met hun slotnummer.
 - Goederen worden uitgewisseld zodra er stations bij twee industrieën staan en er voertuigen tussen rijden.
+- **Overslag**: vracht kan overstappen op een andere lijn bij stations die binnen bereik van elkaar liggen (bij een
+  haven tot 2 tegels), bv. vrachtwagen → haven → schip → haven → trein → raffinaderij. De opbrengst wordt bij de
+  klant verdeeld over de lijnen naar de afstand die ze afleggen.
+- Op de kaart staat onder elke industrie de productieketen met duidelijke icoontjes (bv. 🌾 → 🥫), en bij elke stad
+  wat ze vraagt.
 
 **Nice to have, ook al gedaan**
 
@@ -197,6 +209,7 @@ shared/   Spelregels in TypeScript, zonder afhankelijkheden (draait in server é
   pathfind.ts      routes voor voertuigen over het netwerk (incl. bondgenoten)
   simulation.ts    productie, passagiers, laden, rijden, afleveren, tol, onderhoud (40 stappen per beurt)
   economy.ts       bereik van stations, opbrengstformule, HQ-bonus, schattingen
+  transfer.ts      overslag: waar vracht verder kan via stations binnen bereik
   market.ts        prijzen op basis van vraag en aanbod
   resolve.ts       uitvoeren van een beurt (veilingen, slot 1..N, simulatie) en de voorbeeldweergave
   alliances.ts     allianties
@@ -207,8 +220,9 @@ scripts/  dev.mjs (ontwikkelen) en online.mjs (online spelen via een Cloudflare-
 e2e/      End-to-end test die een spel via de echte UI speelt en screenshots maakt
 ```
 
-- De server is de baas: hij bewaart de geheime acties van elke speler en voert de beurt uit met dezelfde code
-  (`resolveTurn`) die de client gebruikt om je eigen acties vooraf te laten zien (`previewOrders`).
+- De server is de baas: hij bewaart de geheime acties van elke speler (en hun wachtrij voor de volgende beurten)
+  en voert de beurt uit met dezelfde code (`resolveTurn`) die de client gebruikt om je eigen acties vooraf te
+  laten zien (`previewOrders`). Na een beurt zet hij de eerste acties uit elke wachtrij in de nieuwe slots.
 - Een beurt: eerst sluiten de veilingen waarvan het hoogste bod een hele beurt stond; dan per slot alle
   bouwacties van alle spelers tegelijk (claims per tegel), gevolgd door de voertuig-acties; daarna 40
   simulatiestappen (productie → stations → voertuigen), onderhoud, rente, marktupdate en nieuwe veilingen.

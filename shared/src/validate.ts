@@ -1,6 +1,6 @@
 // Sanitising orders received from clients. Only the shape is checked here; the game rules are
 // applied when the turn is resolved (the world may change before then).
-import { MAX_VEHICLES_PER_ACTION, VEHICLES } from './config';
+import { MAX_QUEUED_ACTIONS, MAX_VEHICLES_PER_ACTION, VEHICLES } from './config';
 import { isAdjacent, validTile } from './geometry';
 import type { Grid } from './geometry';
 import type { Action, MapData, OrderSlots, StationKind, TransportKind, VehicleModelId } from './types';
@@ -65,4 +65,26 @@ export function sanitizeOrders(map: MapData, input: unknown, slotCount: number):
 
 export function emptySlots(count: number): OrderSlots {
   return Array.from({ length: count }, () => null);
+}
+
+export type SanitizeQueueResult = { ok: true; queue: Action[] } | { ok: false; error: string };
+
+/** The queue of actions for the next turns. */
+export function sanitizeQueue(map: MapData, input: unknown): SanitizeQueueResult {
+  if (!Array.isArray(input) || input.length > MAX_QUEUED_ACTIONS) return { ok: false, error: 'queue_invalid' };
+  const grid = { width: map.width, height: map.height };
+  const queue: Action[] = [];
+  for (const raw of input) {
+    const action = sanitizeAction(grid, raw);
+    if (!action) return { ok: false, error: 'queue_invalid' };
+    queue.push(action);
+  }
+  return { ok: true, queue };
+}
+
+/** Start of a new turn: the first queued actions fill the slots, the rest stays in the queue. */
+export function takeFromQueue(queue: readonly Action[], slotCount: number): { slots: OrderSlots; queue: Action[] } {
+  const slots = emptySlots(slotCount);
+  queue.slice(0, slotCount).forEach((a, i) => (slots[i] = a));
+  return { slots, queue: queue.slice(slotCount) };
 }

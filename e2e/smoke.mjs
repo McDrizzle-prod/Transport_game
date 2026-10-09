@@ -243,6 +243,20 @@ try {
     await saved();
   }
 
+  // A station within reach of another one can hand freight over (transshipment); the tool says so.
+  {
+    const [ax, ay] = xy(stationA);
+    const nextToA = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]
+      .map(([dx, dy]) => tileOf(ax + dx, ay + dy))
+      .find((t) => free(t) && !roadPath.includes(t));
+    if (nextToA !== undefined) {
+      await page.getByRole('button', { name: 'Station' }).click();
+      await clickTile(nextToA);
+      check((await page.locator('.tool-panel').innerText()).includes('Overslag met'), 'a station next to another one offers transshipment');
+      await page.locator('.tool-panel').getByRole('button', { name: 'Annuleren' }).click();
+    }
+  }
+
   // A picked vehicle only fits its own kind of station.
   await page.getByRole('button', { name: 'Voertuigen' }).click();
   await page.locator('.model', { hasText: 'Stoomtrein' }).click();
@@ -400,17 +414,24 @@ try {
     await page.getByRole('tab', { name: /Acties/ }).click();
     await page.getByRole('button', { name: 'Weg' }).click();
     await focus(tileOf(x0 + 2, y0 + 2));
-    for (const [dx, dy] of [[0, 0], [3, 0], [3, 3]]) await clickTile(tileOf(x0 + dx, y0 + dy));
-    // With the mouse over another tile, the next piece shows dashed.
+    for (const [dx, dy] of [[0, 0], [3, 0]]) await clickTile(tileOf(x0 + dx, y0 + dy));
+    // After A and B the route is locked: a stray tap (e.g. just beside the ✓) changes nothing.
+    await clickTile(tileOf(x0 + 3, y0 + 3));
+    check((await page.evaluate(() => window.__transportrijk.route())).length === 4, 'after A and B a tap on the map does not change the route');
+    // ＋ adds one more point (a bend).
+    await page.getByRole('button', { name: 'Punt toevoegen' }).click();
+    await clickTile(tileOf(x0 + 3, y0 + 3));
+    const drawn = await page.evaluate(() => window.__transportrijk.route());
+    const expected = [[0, 0], [1, 0], [2, 0], [3, 0], [3, 1], [3, 2], [3, 3]].map(([dx, dy]) => tileOf(x0 + dx, y0 + dy));
+    check(JSON.stringify(drawn) === JSON.stringify(expected), 'with ＋ the route runs exactly through the extra point');
+    // While adding a point, the mouse shows the next piece dashed.
+    await page.getByRole('button', { name: 'Punt toevoegen' }).click();
     const [gx, gy] = await clientPos(tileOf(x0, y0 + 3));
     await page.mouse.move(gx, gy);
     await page.waitForTimeout(200);
     await page.screenshot({ path: path.join(shots, '10c-route-points.png') });
-    const drawn = await page.evaluate(() => window.__transportrijk.route());
-    const expected = [[0, 0], [1, 0], [2, 0], [3, 0], [3, 1], [3, 2], [3, 3]].map(([dx, dy]) => tileOf(x0 + dx, y0 + dy));
-    check(JSON.stringify(drawn) === JSON.stringify(expected), 'the route runs exactly through the tapped points');
     await clickTile(tileOf(x0 + 3, y0 + 1));
-    check((await page.evaluate(() => window.__transportrijk.route())).length === 5, 'a tap on the route takes it back to that tile');
+    check((await page.evaluate(() => window.__transportrijk.route())).length === 5, 'with ＋, a tap on the route takes it back to that tile');
     await page.getByRole('button', { name: 'Laatste punt terug' }).click();
     check((await page.evaluate(() => window.__transportrijk.route())).length === 4, 'the undo button takes the last point back');
     await page.getByRole('button', { name: 'Annuleren' }).click();
@@ -439,6 +460,53 @@ try {
   await focus(tileOf(share.x, share.y));
   await page.waitForTimeout(2600);
   await page.screenshot({ path: path.join(shots, '14-share-glow.png') });
+
+  // The queue: a route that doesn't fit in this turn's slots continues in the next turns by itself.
+  view = await api('GET', `/api/games/${gameId}/view`);
+  const occupied = (t) => !!view.game.infra.tiles[t] || view.game.stations.some((st) => st.tile === t) || view.game.players.some((p) => p.hq === t);
+  let row = null;
+  for (let r = 2; r < 16 && !row; r++) {
+    for (const [ox, oy] of [[r, 0], [-r - 6, 0], [0, r], [0, -r], [r, r], [-r - 6, -r], [-r - 6, r], [r, -r]]) {
+      const cand = [0, 1, 2, 3, 4, 5, 6].map((dx) => tileOf(hqx + ox + dx, hqy + oy));
+      if (cand.every((t) => free(t) && !occupied(t))) {
+        row = cand;
+        break;
+      }
+    }
+  }
+  if (row) {
+    // 17 of the 20 slots are already used (actions that will simply fail).
+    const filler = Array.from({ length: 17 }, () => ({ type: 'sell', line: 999999, count: 1 }));
+    await api('PUT', `/api/games/${gameId}/orders`, { slots: [...filler, null, null, null], ready: false }, myToken);
+    await page.waitForTimeout(700);
+    await page.getByRole('tab', { name: /Acties/ }).click();
+    await page.getByRole('button', { name: 'Weg' }).click();
+    await focus(row[3]);
+    await clickTile(row[0]);
+    await clickTile(row[6]);
+    check((await page.locator('.route-bar').innerText()).includes('naar wachtrij'), 'the route bar says what goes to the queue');
+    await page.getByRole('button', { name: 'Route plannen' }).click();
+    await saved();
+    view = await api('GET', `/api/games/${gameId}/view`, undefined, myToken);
+    check(view.orders.slots.filter(Boolean).length === 20 && view.orders.queue?.length === 3, `3 segments this turn, 3 in the queue (${view.orders.queue?.length})`);
+    const queuePanel = page.locator('.queue');
+    await queuePanel.scrollIntoViewIfNeeded();
+    check((await queuePanel.innerText()).includes(`B${view.game.turn + 1}`), 'the queue shows the turn it is for');
+    await page.screenshot({ path: path.join(shots, '17-queue.png') });
+    // Edit: free two slots and pull the queue forward.
+    await page.locator('.slot', { hasText: 'verkopen' }).first().getByRole('button', { name: 'Verwijderen' }).click();
+    await page.locator('.slot', { hasText: 'verkopen' }).first().getByRole('button', { name: 'Verwijderen' }).click();
+    await page.getByRole('button', { name: /naar deze beurt/ }).click();
+    await saved();
+    view = await api('GET', `/api/games/${gameId}/view`, undefined, myToken);
+    check(view.orders.queue?.length === 1, 'two queued actions pulled into the freed slots');
+    const queued = view.orders.queue[0];
+    await api('POST', `/api/games/${gameId}/resolve`, {}, myToken);
+    await page.waitForTimeout(800);
+    view = await api('GET', `/api/games/${gameId}/view`, undefined, myToken);
+    check(JSON.stringify(view.orders.slots[0]) === JSON.stringify(queued) && view.orders.queue.length === 0, 'after the turn the queued action is in slot 1');
+    await page.keyboard.press('Escape');
+  } else log('no room for the queue check');
 
   // --- a friend opens the game link (from the address bar) on a phone: first the join form, not the map ---
   const friendPhone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });

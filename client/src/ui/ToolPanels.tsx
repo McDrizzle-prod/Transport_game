@@ -14,6 +14,7 @@ import {
   coverageAt,
   estimateLine,
   stationLinked,
+  transferPartners,
 } from '@transport/shared';
 import type { CargoId, StationKind, VehicleModelId } from '@transport/shared';
 import { dec, money, num, tileLabel } from '../format';
@@ -21,14 +22,16 @@ import { TRANSPORT_ICON, cargoLabel, msgText, reasonText } from '../i18n';
 import { useStore, useUi } from '../state/store';
 import { rememberStation } from './ToolBar';
 
-/** Explains why the confirm button is disabled when every slot is used. */
+/** Explains where an action goes when every slot of this turn is used: the queue for the next turns. */
 function SlotsFull() {
   const store = useStore();
   useUi((s) => s.draft);
+  const queue = useUi((s) => s.queue);
   if (store.targetSlot() >= 0) return null;
   return (
-    <p className="warn small">
-      Al je {store.slotCount()} actieslots zijn gevuld. Verwijder eerst een actie, of plan dit volgende beurt.
+    <p className="hint small">
+      Al je {store.slotCount()} actieslots van deze beurt zijn gevuld: deze actie komt in de <strong>wachtrij</strong> en wordt in beurt{' '}
+      {store.queueTurn(queue.length)} uitgevoerd.
     </p>
   );
 }
@@ -36,16 +39,22 @@ function SlotsFull() {
 function SlotTarget() {
   const store = useStore();
   useUi((s) => s.draft);
+  useUi((s) => s.queue);
   const slot = store.targetSlot();
-  return slot < 0 ? <span className="badge failed">alle slots vol</span> : <span className="badge slotbadge">→ slot {slot + 1}</span>;
+  return slot < 0 ? <span className="badge queued">→ wachtrij</span> : <span className="badge slotbadge">→ slot {slot + 1}</span>;
 }
 
-/** Free action slots: a route needs one per segment. */
+/** Text of the confirm button of the station and vehicle tools. */
+function confirmText(slot: number, editing: boolean): string {
+  return slot < 0 ? '⏭ In de wachtrij' : `✓ ${editing ? 'Bijwerken' : 'In slot'} ${slot + 1}`;
+}
+
+/** Free action slots: a route needs one per segment; the rest goes to the queue. */
 function FreeSlots() {
   const store = useStore();
   useUi((s) => s.draft);
   const free = store.freeSlots().length;
-  return <span className={`badge ${free ? 'slotbadge' : 'failed'}`}>{free ? `${free} vrije acties` : 'alle slots vol'}</span>;
+  return <span className={`badge ${free ? 'slotbadge' : 'queued'}`}>{free ? `${free} vrije acties` : 'slots vol → wachtrij'}</span>;
 }
 
 export function RouteToolPanel() {
@@ -71,19 +80,27 @@ export function RouteToolPanel() {
       <ol className="route-steps">
         <li className={tool.path.length > 0 ? 'done' : 'now'}>Tik op het beginpunt (A).</li>
         <li className={tool.path.length > 1 ? 'done' : tool.path.length === 1 ? 'now' : ''}>
-          Tik op het eindpunt (B). Je {name} loopt in een rechte lijn van A naar B; met meer punten maak je bochten.
+          Tik op het eindpunt (B). Je {name} loopt in een rechte lijn van A naar B en staat dan vast: tikken op de kaart verandert hem niet meer.
         </li>
-        <li className={tool.path.length > 1 ? 'now' : ''}>Klopt de ligging? Tik op het groene vinkje ✓.</li>
+        <li className={tool.path.length > 1 ? 'now' : ''}>
+          Klopt de ligging? Tik op het groene vinkje ✓. Een bocht nodig? Tik op ＋ en dan op het volgende punt; ↶ haalt het laatste punt weg.
+        </li>
       </ol>
       <p className="muted small">
-        Elk stuk van tegel naar tegel kost <strong>1 actie</strong> (een station ook). Tik op je {name} om terug te gaan naar dat punt, of gebruik ↶
-        om het laatste punt weg te halen.
+        Elk stuk van tegel naar tegel kost <strong>1 actie</strong> (een station ook). Past de route niet in deze beurt, dan gaat de rest in de
+        wachtrij: die acties komen vanzelf in je slots van de volgende beurten.
       </p>
       {plan?.plan?.fatal && <p className="error">{msgText(plan.plan.fatal)}</p>}
       {plan?.path && plan.plan && !plan.plan.fatal && (
         <p className="route-summary">
           <strong>{num(actions.length)} acties</strong> · {money(plan.plan.cost)}
-          {actions.length > free && <span className="warn small"> · past niet helemaal: {free} vrij, de rest volgende beurt</span>}
+          {actions.length > free && (
+            <span className="small">
+              {' '}
+              · {free > 0 ? `${free} deze beurt, ` : ''}
+              {actions.length - free} in de wachtrij voor de volgende beurten
+            </span>
+          )}
         </p>
       )}
       {blocked.length > 0 && <p className="warn">⚠ {blocked.length} tegel(s) zijn al van een andere speler; daar kun je niet bouwen.</p>}
@@ -123,14 +140,16 @@ export function RouteBar() {
   const plan = store.routePlan();
   const actions = plan ? store.routeActions(plan) : [];
   const free = store.freeSlots().length;
-  const ok = !!plan?.plan && !plan.plan.fatal && actions.length > 0 && free > 0;
+  const ok = !!plan?.plan && !plan.plan.fatal && actions.length > 0 && actions.length - free <= store.queueRoom();
   const text =
     tool.path.length === 0
       ? 'Tik op het beginpunt (A)'
       : tool.path.length === 1
         ? 'Tik op het eindpunt (B)'
-        : plan?.plan && !plan.plan.fatal
-          ? `${num(actions.length)} acties · ${money(plan.plan.cost)}${actions.length > free ? ` · ${free} vrij` : ''}`
+        : tool.adding
+          ? 'Tik op het volgende punt'
+          : plan?.plan && !plan.plan.fatal
+          ? `${num(actions.length)} acties · ${money(plan.plan.cost)}${actions.length > free ? ` · ${actions.length - free} naar wachtrij` : ''}`
           : 'Deze route kan niet';
   return (
     <div className="route-bar" role="toolbar" aria-label="Route">
@@ -140,10 +159,21 @@ export function RouteBar() {
       <button className="icon-btn" aria-label="Laatste punt terug" title="Laatste punt terug" disabled={tool.path.length === 0} onClick={() => store.undoRoutePoint()}>
         ↶
       </button>
+      {tool.points.length >= 2 && (
+        <button
+          className={`icon-btn ${tool.adding ? 'active' : ''}`}
+          aria-label="Punt toevoegen"
+          aria-pressed={!!tool.adding}
+          title="Nog een punt (bocht) toevoegen"
+          onClick={() => store.toggleRouteAdding()}
+        >
+          ＋
+        </button>
+      )}
       <button className="icon-btn" aria-label="Annuleren" title="Annuleren" onClick={() => store.setTool({ kind: 'inspect' })}>
         ✕
       </button>
-      <button className="confirm-btn" aria-label="Route plannen" title="Route plannen" disabled={!ok} onClick={() => store.confirmRoute()}>
+      <button className="confirm-btn" aria-label="Route plannen" title="Route plannen" disabled={!ok || !!tool.adding} onClick={() => store.confirmRoute()}>
         ✓
       </button>
     </div>
@@ -168,6 +198,7 @@ export function StationToolPanel() {
   const canPlace = !!check && check.ok && !check.exists && tool.tile !== null;
   const linked = world && tile !== null && check?.ok && !check.exists ? stationLinked(world, me.id, tool.station, tile) : null;
   const network = tool.station === 'rail' ? 'spoor' : 'weg';
+  const partners = world && tile !== null && check?.ok ? transferPartners(world, { kind: tool.station, tile }, me.id) : [];
 
   return (
     <section className="panel-section tool-panel">
@@ -207,6 +238,11 @@ export function StationToolPanel() {
         </p>
       )}
       {cov && <CoverageList industries={cov.industries.map((i) => i.id)} cities={cov.cities.map((c) => c.id)} />}
+      {partners.length > 0 && (
+        <p className="ok-text small">
+          ⇄ Overslag met {partners.map((p) => `${STATIONS[p.kind].icon} ${p.name}`).join(', ')}: vracht die hier aankomt kan daar verder.
+        </p>
+      )}
       <SlotsFull />
       <div className="button-row">
         <button className="secondary" onClick={() => store.setTool({ kind: 'inspect' })}>
@@ -214,10 +250,10 @@ export function StationToolPanel() {
         </button>
         <button
           className="primary"
-          disabled={!canPlace || slot < 0}
+          disabled={!canPlace}
           onClick={() => tool.tile !== null && store.addAction({ type: 'station', kind: tool.station, tile: tool.tile })}
         >
-          {slot < 0 ? 'Alle slots vol' : `✓ ${tool.editSlot !== null ? 'Bijwerken' : 'In slot'} ${slot + 1}`}
+          {confirmText(slot, tool.editSlot !== null)}
         </button>
       </div>
     </section>
@@ -282,9 +318,11 @@ export function VehicleToolPanel() {
   if (tool.kind !== 'vehicles') return null;
   const me = store.me()!;
   const world = store.planningWorld();
+  // Estimate with everything planned this turn (also lines in later slots that take freight further).
+  const full = store.preview()?.world ?? world;
   const model = VEHICLES[tool.model];
   const slot = store.targetSlot();
-  const est = world && tool.from !== null && tool.to !== null ? estimateLine(world, me.id, tool.model, tool.from, tool.to, tool.count) : null;
+  const est = full && tool.from !== null && tool.to !== null ? estimateLine(full, me.id, tool.model, tool.from, tool.to, tool.count) : null;
   const fromStation = tool.from !== null ? world?.stationAt.get(tool.from) : undefined;
   const toStation = tool.to !== null ? world?.stationAt.get(tool.to) : undefined;
   const kindMismatch = (fromStation && fromStation.kind !== model.kind) || (toStation && toStation.kind !== model.kind);
@@ -383,7 +421,7 @@ export function VehicleToolPanel() {
             <p className="warn">
               {model.carries === 'passengers'
                 ? 'Geen passagiers tussen deze stations: beide stations moeten bij een (andere) stad liggen.'
-                : 'Geen vracht tussen deze stations: zorg dat bij het ene station iets wordt geproduceerd dat bij het andere station wordt gevraagd.'}
+                : 'Geen vracht tussen deze stations: zorg dat bij het ene station iets wordt geproduceerd dat bij het andere station wordt gevraagd, of dat een andere lijn het daar overneemt (overslag).'}
             </p>
           ) : (
             <table className="flows">
@@ -400,6 +438,13 @@ export function VehicleToolPanel() {
                   <tr key={k}>
                     <td>
                       {CARGO[f.cargo].icon} {f.direction === 0 ? '→' : '←'} <small>{f.consumer.name}</small>
+                      {f.inbound && <small className="muted"> · van {f.origin.name}, overgeslagen</small>}
+                      {f.via && f.via.length > 0 && (
+                        <small className="transfer">
+                          {' '}
+                          · ⇄ {f.via.join(' ⇄ ')} · jouw deel {Math.round((f.share ?? 1) * 100)}%
+                        </small>
+                      )}
                       {f.excludedBy && <small className="neg"> · alleen voor {store.playerName(f.excludedBy)} (meerderheid aandelen)</small>}
                       {f.toll > 0 && <small className="muted"> · {Math.round(f.toll * 100)}% naar aandeelhouders</small>}
                     </td>
@@ -424,6 +469,8 @@ export function VehicleToolPanel() {
           <p className="muted small">
             Opbrengst = hoeveelheid × prijs × marktprijs × hemelsbrede afstand tussen herkomst en bestemming (voor passagiers: tussen de twee steden).
             Geld komt binnen zodra een voertuig aankomt.
+            {est.flows.some((f) => f.via?.length) &&
+              ' Bij overslag (⇄) komt het geld binnen als de vracht bij de klant is; elke lijn krijgt een deel naar de afstand die ze aflegt.'}
           </p>
         </div>
       )}
@@ -437,14 +484,14 @@ export function VehicleToolPanel() {
         </button>
         <button
           className="primary"
-          disabled={tool.from === null || tool.to === null || !!kindMismatch || slot < 0}
+          disabled={tool.from === null || tool.to === null || !!kindMismatch}
           onClick={() =>
             tool.from !== null &&
             tool.to !== null &&
             store.addAction({ type: 'vehicles', model: tool.model, from: tool.from, to: tool.to, count: tool.count })
           }
         >
-          {slot < 0 ? 'Alle slots vol' : `✓ ${tool.editSlot !== null ? 'Bijwerken' : 'In slot'} ${slot + 1}`}
+          {confirmText(slot, tool.editSlot !== null)}
         </button>
       </div>
     </section>

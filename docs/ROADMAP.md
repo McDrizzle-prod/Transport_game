@@ -29,8 +29,24 @@
 | **Testronde 3:** nieuwe spelers landen op de meedoen-pagina, niet op de kaart | ✅ een spellink zonder bedrijf opent het meedoen-formulier; het startscherm begint met meedoen |
 | **Testronde 3:** wegen op mobiel: punt A, punt B, voorbeeld, groen vinkje | ✅ voor muis én touch; slepen tekent niet meer (dat legde wegen waar je de kaart verschoof) |
 | **Testronde 3:** meespelen buiten je wifi (tot 6 spelers) | ✅ `npm run online` (gratis Cloudflare-tunnel vanaf je eigen computer) + pincode om verder te spelen |
+| **Testronde 4:** acties die niet in de beurt passen bewaren voor de volgende beurten, met een overzicht om te wijzigen | ✅ wachtrij op de server: vult na elke beurt vanzelf de slots; volgorde wijzigen, weghalen, naar voren halen |
+| **Testronde 4:** na punt A en B geen voorbeeldmodus meer, zodat een tik naast het vinkje geen spoor legt | ✅ de route staat dan vast; ＋ voor een extra punt (bocht) |
+| **Testronde 4:** grotere icoontjes van de productieketen op de kaart | ✅ in een label onder elke industrie (🌾 → 🥫), al zichtbaar als je ver uitzoomt; ook de vraag van steden |
+| **Testronde 4:** overslag: vrachtwagen → haven → schip → haven → trein → raffinaderij | ✅ tussen stations binnen bereik van elkaar (haven: 2 tegels); opbrengst verdeeld naar afstand |
 | Veilingen voor aandelen in industrieën (exclusief gebruik / winstdeling) | ✅ basisversie, zie hieronder |
 | Schulden → gedwongen verkoop van eigen aandelen → laatste alliantie wint | 🟡 leningen zijn er; aandelen van bedrijven en het eindspel nog niet |
+
+### Gemaakte keuzes bij testronde 4 (graag feedback)
+
+- **Overslag gebeurt automatisch**: vracht stapt over als er bij het station geen klant voor is en een lijn van jou
+  (of een bondgenoot) haar verder brengt, via het station zelf of een station binnen bereik. Er is (nog) geen
+  instelling per lijn zoals "alleen lossen" of "overslaan naar station X".
+- **Geld pas bij de klant**: een lijn die vracht overslaat, verdient pas als de vracht bij de klant aankomt; dan
+  krijgt elke lijn een deel naar de afstand tussen haar twee stations. Zo levert een omweg via veel lijnen niet
+  meer op dan de directe afstand van industrie tot klant (zoals altijd).
+- **Alleen vracht**: passagiers stappen niet over; ze reizen rechtstreeks tussen twee steden.
+- **Wachtrij**: acties in de wachtrij worden niet vooraf gecontroleerd op geld; het spel waarschuwt wel (⚠) als een
+  tegel inmiddels van een ander is. Een mislukte actie kost niets.
 
 ### Testronde 2: oorzaak van het laadpunt-probleem
 
@@ -120,8 +136,14 @@ afhandeling in `closeAuctions`, grafiek van de bedrijfswaarde in het tabblad Beu
 - Grotere kaarten en een kaarteditor.
 
 **Bediening**
-- Een geplande route in één keer verplaatsen naar andere slots (nu per stuk met ▲/▼).
+- Een geplande route in één keer verplaatsen naar andere slots (nu per stuk met ▲/▼; in de wachtrij kan het al per route).
 - Een al geplande route achteraf aanpassen (nu: verwijderen en opnieuw tekenen).
+- Acties uit deze beurt naar de wachtrij verschuiven (nu alleen andersom).
+
+**Overslag**
+- Lijninstellingen zoals "alleen lossen", "wachten op volle lading" of een vaste overslagplek.
+- Overstappende passagiers (bus naar de veerboot).
+- Wachtende vracht bij overslagstations zichtbaar op de kaart (nu in de stationsinfo).
 
 ## Techniek
 
@@ -144,6 +166,8 @@ afhandeling in `closeAuctions`, grafiek van de bedrijfswaarde in het tabblad Beu
 ## Bekende beperkingen van de proof of concept
 
 - Geen slopen, geen lijnen met meerdere stops, geen bewerking van bestaande lijnen.
+- Bij overslag kan een station per vrachtsoort maximaal 400 eenheden laten wachten; wat er niet meer bij past, gaat
+  verloren.
 - De spelbalans is met simulaties ingesteld, niet met echte spelers. Met 5 acties per beurt duurt een eerste
   verbinding een paar beurten; voor een snellere start kan de host meer acties kiezen.
 - Spellen uit de vorige versie kunnen worden geladen, maar zijn gemaakt met de oude kaart (industrieën dichter

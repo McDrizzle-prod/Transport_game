@@ -16,6 +16,7 @@ import {
   highestBid,
   majorityHolder,
   stationCoverage,
+  transferPartners,
 } from '@transport/shared';
 import type { CargoId, Station } from '@transport/shared';
 import { money, num, tileLabel } from '../format';
@@ -232,6 +233,7 @@ function StationInfo({ station }: { station: Station }) {
   const cov = world ? stationCoverage(world, station) : null;
   const lines = view.game.lines.filter((l) => l.stations.includes(station.id));
   const def = STATIONS[station.kind];
+  const partners = world ? transferPartners(world, station, me ?? station.owners[0]) : [];
   return (
     <div className="info-block">
       <h3>
@@ -243,14 +245,28 @@ function StationInfo({ station }: { station: Station }) {
       {station.waiting.length > 0 && (
         <p className="small">
           Wacht op transport:{' '}
-          {station.waiting.map((l) => (
-            <span key={`${l.cargo}${l.origin}`} className="pill">
+          {station.waiting.map((l, k) => (
+            <span key={k} className="pill" title={l.legs?.length ? 'Overgeslagen van een andere lijn' : undefined}>
               {CARGO[l.cargo].icon} {l.amount}
+              {l.legs?.length ? ' ⇄' : ''}
             </span>
           ))}
         </p>
       )}
       {cov && <CoverageList industries={cov.industries.map((i) => i.id)} cities={cov.cities.map((c) => c.id)} />}
+      <p className="small">
+        {partners.length > 0 ? (
+          <>
+            ⇄ <strong>Overslag</strong> met {partners.map((p) => `${STATIONS[p.kind].icon} ${p.name}`).join(', ')}: vracht die hier aankomt en
+            hier geen klant heeft, gaat daar verder met een andere lijn (en omgekeerd).
+          </>
+        ) : (
+          <span className="muted">
+            ⇄ Overslag: zet een ander station binnen bereik (naast een {STATIONS.road.name.toLowerCase()} of treinstation, of tot{' '}
+            {STATIONS.water.radius} tegels van een haven), dan kan vracht hier overstappen op een andere lijn.
+          </span>
+        )}
+      </p>
       {lines.length > 0 && (
         <>
           <h4>Lijnen</h4>
@@ -266,6 +282,12 @@ function StationInfo({ station }: { station: Station }) {
                   · {vs.length}× {vs[0] ? VEHICLES[vs[0].model].icon : l.carries === 'passengers' ? '👥' : ''} ·{' '}
                   {l.length ? `${l.length} tegels` : 'geen verbinding!'}
                   {' · '}vorige beurt {money(l.stats.revenue)} ({l.stats.trips} ritten)
+                  {Object.entries(l.stats.transferred ?? {}).map(([c, n]) => (
+                    <span key={c}>
+                      {' · '}
+                      {CARGO[c as CargoId].icon} {num(n ?? 0)} overgeslagen
+                    </span>
+                  ))}
                   {mine && vs.length > 0 && (
                     <button className="link small" onClick={() => store.addAction({ type: 'sell', line: l.id, count: 1 })}>
                       verkoop 1 voertuig ({money(VEHICLES[vs[0].model].price * VEHICLE_RESALE)})

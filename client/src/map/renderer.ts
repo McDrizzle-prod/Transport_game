@@ -91,6 +91,7 @@ export class MapRenderer {
       const fresh = edges.filter((e) => e.turn === hide.turn && e.slot === hide.activeSlot);
       this.glowEdges(scene, fresh);
     }
+    this.drawQueuedEdges(scene, scene.queued.edges.filter((e) => this.edgeVisible(e, map.width, view)), cam.zoom);
     this.drawPlannedEdges(scene, scene.plannedEdges.filter((e) => this.edgeVisible(e, map.width, view)), cam.zoom);
     if (scene.tool) this.drawToolWorld(scene, scene.tool, cam.zoom);
     this.drawVehicles(scene, scene.vehicles, view, cam.zoom);
@@ -115,6 +116,7 @@ export class MapRenderer {
       ctx.restore();
     }
     this.drawCities(scene, cam);
+    if (!hide) this.drawTransferLinks(scene, cam);
     this.drawStations(scene, cam, view);
     this.drawHqs(scene, cam);
     if (scene.hqZone && cam.zoom >= 6) {
@@ -315,6 +317,15 @@ export class MapRenderer {
     ctx.globalCompositeOperation = 'lighter';
     this.strokeEdges(scene, edges, 0.9, 'rgba(255, 240, 160, 0.35)');
     ctx.restore();
+  }
+
+  /** The queue for the next turns: a faint dotted line in the player's colour. */
+  private drawQueuedEdges(scene: Scene, edges: Edge[], zoom: number): void {
+    if (!edges.length) return;
+    const myColor = (scene.me && scene.colors.get(scene.me)) || '#fff';
+    this.ctx.lineCap = 'round';
+    this.strokeEdges(scene, edges, Math.max(0.3, 2.4 / zoom), 'rgba(12, 18, 24, 0.35)');
+    this.strokeEdges(scene, edges, Math.max(0.2, 1.6 / zoom), hexToRgba(myColor, 0.75), [0.12, 0.2]);
   }
 
   private drawPlannedEdges(scene: Scene, edges: Edge[], zoom: number): void {
@@ -598,16 +609,58 @@ export class MapRenderer {
         ctx.textBaseline = 'middle';
         ctx.fillText(text, sx + r - 1, sy - r + 0.5);
       }
-      if (cam.zoom >= 11) {
-        this.label(ind.name, sx, sy + size / 2 + 9, `600 11px ${UI_FONT}`);
-        if (cam.zoom >= 18) {
-          const line = def.inputs
-            ? `${Object.keys(def.inputs).map((c) => CARGO[c as keyof typeof CARGO].icon).join('+')} → ${CARGO[def.output].icon}`
-            : `${CARGO[def.output].icon} ${ind.rate}/beurt`;
-          this.label(line, sx, sy + size / 2 + 23, `11px ${UI_FONT}`, '#ffe9a8');
-        }
+      // The production chain under the icon, big enough to read: what goes in → what comes out.
+      let below = sy + size / 2 + 3;
+      if (cam.zoom >= 6) {
+        const g = chainGlyphSize(cam.zoom);
+        const items: PillItem[] = def.inputs
+          ? [
+              ...(Object.keys(def.inputs) as CargoId[]).flatMap((c, i): PillItem[] =>
+                i > 0 ? [{ text: '+' }, { glyph: CARGO[c].icon }] : [{ glyph: CARGO[c].icon }],
+              ),
+              { text: '→' },
+              { glyph: CARGO[def.output].icon },
+            ]
+          : [{ glyph: CARGO[def.output].icon }, { text: cam.zoom >= 18 ? `${ind.rate}/beurt` : String(ind.rate) }];
+        below += this.pill(items, sx, below, g, def.color) + 3;
       }
+      if (cam.zoom >= 11) this.label(ind.name, sx, below + 7, `600 11px ${UI_FONT}`);
     }
+  }
+
+  /** A dark pill with emoji (and short texts) in a row; `top` is its upper edge. Returns its height. */
+  private pill(items: PillItem[], x: number, top: number, g: number, border?: string): number {
+    const ctx = this.ctx;
+    const font = `800 ${Math.round(g * 0.62)}px ${UI_FONT}`;
+    ctx.font = font;
+    const gap = Math.round(g * 0.16);
+    const widths = items.map((it) => ('glyph' in it ? g : ctx.measureText(it.text).width));
+    const inner = widths.reduce((sum, w) => sum + w, 0) + gap * (items.length - 1);
+    const h = g + 8;
+    const w = inner + 14;
+    const y = top + h / 2;
+    this.roundRect(x - w / 2, top, w, h, h / 2);
+    ctx.fillStyle = 'rgba(16, 24, 32, 0.86)';
+    ctx.fill();
+    if (border) {
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = border;
+      ctx.stroke();
+    }
+    let cx = x - inner / 2;
+    items.forEach((it, i) => {
+      if ('glyph' in it) {
+        this.drawGlyph(it.glyph, cx + g / 2, y, g);
+      } else {
+        ctx.font = font;
+        ctx.fillStyle = '#ffe9a8';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(it.text, cx + widths[i] / 2, y + 0.5);
+      }
+      cx += widths[i] + gap;
+    });
+    return h;
   }
 
   private drawCities(scene: Scene, cam: Camera): void {
@@ -617,10 +670,11 @@ export class MapRenderer {
       const size = Math.round(Math.max(13, Math.min(18, 10 + cam.zoom * 0.3)));
       const top = sy - c.radius * cam.zoom * 0.2 - 4;
       this.label(c.name, sx, top, `700 ${size}px ${UI_FONT}`);
-      if (cam.zoom >= 8) {
-        // What the city wants: goods (icons) and passengers to other cities.
-        const wants = (Object.keys(c.demand) as CargoId[]).map((cargo) => CARGO[cargo].icon).join('');
-        this.label(`${wants} · 👥 ${cityPassengers(c)}/beurt`, sx, top + 16, `12px ${UI_FONT}`, '#ffe9a8');
+      if (cam.zoom >= 6) {
+        // What the city wants: goods and passengers to other cities.
+        const items: PillItem[] = (Object.keys(c.demand) as CargoId[]).map((cargo) => ({ glyph: CARGO[cargo].icon }));
+        items.push({ text: '·' }, { glyph: '👥' }, { text: cam.zoom >= 18 ? `${cityPassengers(c)}/beurt` : String(cityPassengers(c)) });
+        this.pill(items, sx, top + size / 2 + 3, chainGlyphSize(cam.zoom) - 2);
       }
     }
   }
@@ -657,6 +711,49 @@ export class MapRenderer {
     if (cam.zoom >= 22 && !ghost) this.label(s.name, sx, sy - size / 2 - 8, `600 11px ${UI_FONT}`, '#fff');
   }
 
+  /** Stations within reach of each other (transshipment): a dashed link with ⇄ in the middle. */
+  private drawTransferLinks(scene: Scene, cam: Camera): void {
+    if (cam.zoom < 5 || scene.transferLinks.length === 0) return;
+    const ctx = this.ctx;
+    const w = scene.map.width;
+    ctx.save();
+    for (const [a, b] of scene.transferLinks) {
+      const [ax, ay] = this.toScreen(cam, (a % w) + 0.5, ((a / w) | 0) + 0.5);
+      const [bx, by] = this.toScreen(cam, (b % w) + 0.5, ((b / w) | 0) + 0.5);
+      if (Math.max(ax, bx) < -20 || Math.min(ax, bx) > this.width + 20 || Math.max(ay, by) < -20 || Math.min(ay, by) > this.height + 20) continue;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.lineCap = 'round';
+      ctx.setLineDash([]);
+      ctx.strokeStyle = 'rgba(12, 18, 24, 0.55)';
+      ctx.lineWidth = 6;
+      ctx.stroke();
+      ctx.setLineDash([6, 5]);
+      ctx.strokeStyle = '#d6ecff';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (cam.zoom >= 9) {
+        const mx = (ax + bx) / 2;
+        const my = (ay + by) / 2;
+        ctx.beginPath();
+        ctx.arc(mx, my, 9, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(16, 24, 32, 0.9)';
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#d6ecff';
+        ctx.stroke();
+        ctx.fillStyle = '#d6ecff';
+        ctx.font = `800 11px ${UI_FONT}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('⇄', mx, my + 0.5);
+      }
+    }
+    ctx.restore();
+  }
+
   private drawStations(scene: Scene, cam: Camera, v: View): void {
     const hide = scene.replay;
     const w = scene.map.width;
@@ -671,6 +768,22 @@ export class MapRenderer {
       this.stationBadge(scene, cam, s, false);
     }
     for (const s of scene.plannedStations) if (visible(s)) this.stationBadge(scene, cam, s, true);
+    // Stations in the queue for a next turn: a dashed outline.
+    const ctx = this.ctx;
+    const size = Math.max(16, Math.min(32, cam.zoom * 0.95));
+    for (const t of scene.queued.stations) {
+      const [sx, sy] = this.toScreen(cam, (t % w) + 0.5, ((t / w) | 0) + 0.5);
+      if (sx < -size || sy < -size || sx > this.width + size || sy > this.height + size) continue;
+      this.roundRect(sx - size / 2, sy - size / 2, size, size, size * 0.22);
+      ctx.fillStyle = 'rgba(16, 24, 32, 0.35)';
+      ctx.fill();
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(214, 236, 255, 0.9)';
+      ctx.stroke();
+      ctx.setLineDash([]);
+      this.label('⏭', sx, sy, `700 ${Math.round(size * 0.5)}px ${UI_FONT}`, '#d6ecff');
+    }
   }
 
   private drawHqs(scene: Scene, cam: Camera): void {
@@ -866,6 +979,11 @@ export class MapRenderer {
     ctx.fillText(text, this.width / 2, 77);
   }
 }
+
+type PillItem = { glyph: string } | { text: string };
+
+/** Size (px) of the cargo icons of production chains on the map. */
+const chainGlyphSize = (zoom: number): number => Math.round(Math.max(16, Math.min(24, zoom * 0.9)));
 
 /** Is the flashed tile part of this industry? */
 function flashHits(tile: number, width: number, ind: Industry): boolean {

@@ -2,6 +2,7 @@
 import { createContext, useContext, useSyncExternalStore } from 'react';
 import {
   DEFAULT_ACTION_SLOTS,
+  MAX_QUEUED_ACTIONS,
   STATIONS,
   TRANSPORT,
   VEHICLES,
@@ -12,6 +13,7 @@ import {
   addRoutePoint,
   hqError,
   planBuild,
+  planStation,
   previewOrders,
 } from '@transport/shared';
 import type {
@@ -34,6 +36,7 @@ import { money } from '../format';
 import { errorText, msgText, reasonText } from '../i18n';
 import { activeIdentity } from '../identity';
 import type { Identity } from '../identity';
+import { slotGroups } from './groups';
 
 export type Tab = 'actions' | 'info' | 'report' | 'market' | 'exchange' | 'players' | 'help';
 
@@ -41,11 +44,20 @@ export type ToolState =
   | { kind: 'inspect' }
   | { kind: 'hq' }
   /**
-   * Tap point A, then B (and more points if you like): the route runs in straight lines between them and is
-   * shown as a preview. Only the ✓ puts it in the free slots (one action per segment). `path[0]` is the start;
+   * Tap point A, then B: the route runs in a straight line between them and is shown as a preview. Then it
+   * is locked (taps on the map do nothing, so a tap next to the ✓ can't add track); `adding` allows one more
+   * point for a bend. Only the ✓ puts it in the free slots (one action per segment). `path[0]` is the start;
    * `points` are the indices in `path` of the tapped points.
    */
-  | { kind: 'route'; transport: TransportKind; path: number[]; points: number[]; stationStart: boolean; stationEnd: boolean }
+  | {
+      kind: 'route';
+      transport: TransportKind;
+      path: number[];
+      points: number[];
+      stationStart: boolean;
+      stationEnd: boolean;
+      adding?: boolean;
+    }
   | { kind: 'station'; station: StationKind; tile: number | null; editSlot: number | null }
   | {
       kind: 'vehicles';
@@ -88,6 +100,8 @@ export interface UiState {
   clockOffset: number;
   report: TurnReport | null;
   draft: OrderSlots;
+  /** Actions for the next turns (they fill the slots of a new turn automatically). */
+  queue: Action[];
   ready: boolean;
   sync: 'saved' | 'dirty' | 'saving' | 'error';
   tool: ToolState;
@@ -117,6 +131,7 @@ export class GameStore {
   private memoPreview: { key: unknown[]; value: OrdersPreview } | null = null;
   private memoPlanning = new Map<number, { key: unknown[]; value: World }>();
   private memoGhost: { key: unknown[]; value: number[] | null } | null = null;
+  private memoQueue: { key: unknown[]; value: QueueCheck[] } | null = null;
   private readonly routeCache = new Map<string, RoutePlan>();
   private readonly worldIds = new WeakMap<World, number>();
 
@@ -129,6 +144,7 @@ export class GameStore {
       clockOffset: 0,
       report: null,
       draft: emptySlots(DEFAULT_ACTION_SLOTS),
+      queue: [],
       ready: false,
       sync: 'saved',
       tool: { kind: 'inspect' },
@@ -195,6 +211,7 @@ export class GameStore {
     const patch: Partial<UiState> = { view, clockOffset: view.serverTime - Date.now() };
     if ((!prev || turnChanged || this.state.sync === 'saved') && view.orders) {
       patch.draft = view.orders.slots;
+      patch.queue = view.orders.queue ?? [];
       patch.ready = view.orders.ready;
       patch.sync = 'saved';
     }
@@ -261,6 +278,33 @@ export class GameStore {
     return this.memoPreview.value;
   }
 
+  /**
+   * What the queued actions would cost and whether something is in the way, checked against the world after
+   * this turn's actions (another player may have taken tiles in the meantime).
+   */
+  queueChecks(): QueueCheck[] {
+    const { queue } = this.state;
+    const world = this.preview()?.world;
+    const me = this.state.view?.you?.playerId;
+    if (!world || !me) return queue.map(() => ({ cost: 0, problem: null }));
+    const key = [world, queue];
+    if (this.memoQueue && same(this.memoQueue.key, key)) return this.memoQueue.value;
+    const value = queue.map((a): QueueCheck => {
+      if (a.type === 'vehicles') return { cost: VEHICLES[a.model].price * a.count, problem: null };
+      if (a.type === 'sell') return { cost: 0, problem: null };
+      const plan = a.type === 'build' ? planBuild(world, me, a) : planStation(world, me, a);
+      if (plan.fatal) return { cost: 0, problem: msgText(plan.fatal, this.playerName) };
+      const taken = plan.blocked.filter((b) => b.owners.length > 0);
+      if (taken.length) {
+        const names = [...new Set(taken.flatMap((b) => b.owners))].map(this.playerName).join(' & ');
+        return { cost: plan.cost, problem: `Tegel al van ${names}` };
+      }
+      return { cost: plan.cost, problem: null };
+    });
+    this.memoQueue = { key, value };
+    return value;
+  }
+
   /** Number of action slots per turn in this game. */
   slotCount(): number {
     return this.state.view?.game.settings.actionSlots ?? DEFAULT_ACTION_SLOTS;
@@ -319,17 +363,34 @@ export class GameStore {
     return plan;
   }
 
+  /** Is the route finished (A and B set)? Then taps on the map no longer change it. */
+  routeLocked(): boolean {
+    const tool = this.state.tool;
+    return tool.kind === 'route' && tool.points.length >= 2 && !tool.adding;
+  }
+
+  /** The ＋ of the route bar: the next tap adds one more point (a bend), or cancels that. */
+  toggleRouteAdding(): void {
+    const tool = this.state.tool;
+    if (tool.kind !== 'route' || tool.points.length < 2) return;
+    this.set({ tool: { ...tool, adding: !tool.adding } });
+  }
+
   /** A tap with the route tool: the start, the next point, or a point on the route to go back to. */
   addRoutePoint(tile: number): void {
     const tool = this.state.tool;
     const world = this.planningWorld();
     const me = this.state.view?.you?.playerId;
     if (tool.kind !== 'route' || !world || !me) return;
+    if (this.routeLocked()) {
+      this.toast('De route staat klaar. Tik op ✓ om hem te plannen, op ＋ voor een extra punt of op ↶ om punt B te verplaatsen.', 'info');
+      return;
+    }
     const back = tool.path.indexOf(tile);
     if (back >= 0 && back === tool.path.length - 1) return;
     if (back >= 0) {
       // A tap on the route takes it back to that tile.
-      this.set({ tool: { ...tool, path: tool.path.slice(0, back + 1), points: [...tool.points.filter((i) => i < back), back] } });
+      this.set({ tool: { ...tool, path: tool.path.slice(0, back + 1), points: [...tool.points.filter((i) => i < back), back], adding: false } });
       return;
     }
     const result = addRoutePoint(world, me, tool.transport, tool.path, tile);
@@ -339,7 +400,7 @@ export class GameStore {
       this.toast(ROUTE_ERRORS[result.error](tool.path.length === 0, reason), 'error');
       return;
     }
-    this.set({ tool: { ...tool, path: result.path, points: [...tool.points, result.path.length - 1] } });
+    this.set({ tool: { ...tool, path: result.path, points: [...tool.points, result.path.length - 1], adding: false } });
     if (result.detour) this.toast('Er ligt iets in de weg: de route gaat eromheen. Kijk of de ligging zo goed is.', 'info');
   }
 
@@ -347,6 +408,10 @@ export class GameStore {
   undoRoutePoint(): void {
     const tool = this.state.tool;
     if (tool.kind !== 'route') return;
+    if (tool.adding) {
+      this.set({ tool: { ...tool, adding: false } });
+      return;
+    }
     if (tool.points.length <= 1) {
       this.set({ tool: { ...tool, path: [], points: [] } });
       return;
@@ -360,7 +425,9 @@ export class GameStore {
     const { tool, hover } = this.state;
     const world = this.planningWorld();
     const me = this.state.view?.you?.playerId;
-    if (tool.kind !== 'route' || tool.path.length === 0 || hover === null || !world || !me || tool.path.includes(hover)) return null;
+    if (tool.kind !== 'route' || tool.path.length === 0 || this.routeLocked() || hover === null || !world || !me || tool.path.includes(hover)) {
+      return null;
+    }
     const key = [world, tool.path, hover];
     if (this.memoGhost && same(this.memoGhost.key, key)) return this.memoGhost.value;
     const result = addRoutePoint(world, me, tool.transport, tool.path, hover);
@@ -396,17 +463,40 @@ export class GameStore {
 
   // --- Orders ------------------------------------------------------------------
 
-  private setDraft(draft: OrderSlots, ready = false): void {
-    this.set({ draft, ready, sync: 'dirty' });
+  /** Changes the slots and/or the queue and saves them soon. Editing this turn's slots takes back "ready". */
+  private setPlan(patch: { draft?: OrderSlots; queue?: Action[] }): void {
+    this.set({ ...patch, ready: patch.draft ? false : this.state.ready, sync: 'dirty' });
     window.clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => void this.save(), 500);
+  }
+
+  private setDraft(draft: OrderSlots): void {
+    this.setPlan({ draft });
+  }
+
+  /** Turn in which a queued action (index in the queue) will be executed. */
+  queueTurn(index: number): number {
+    return (this.state.view?.game.turn ?? 1) + 1 + Math.floor(index / this.slotCount());
+  }
+
+  /** Room left in the queue. */
+  queueRoom(): number {
+    return MAX_QUEUED_ACTIONS - this.state.queue.length;
   }
 
   addAction(action: Action): boolean {
     const slot = this.targetSlot();
     if (slot < 0) {
-      this.toast(`Alle ${this.slotCount()} actieslots zijn gevuld. Verwijder eerst een actie.`, 'error');
-      return false;
+      // Every slot is used: the action waits in the queue for a next turn.
+      if (this.queueRoom() < 1) {
+        this.toast(`De wachtrij is vol (${MAX_QUEUED_ACTIONS} acties).`, 'error');
+        return false;
+      }
+      const turn = this.queueTurn(this.state.queue.length);
+      this.setPlan({ queue: [...this.state.queue, action] });
+      this.set({ tool: { kind: 'inspect' }, tab: 'actions' });
+      this.toast(`Alle slots van deze beurt zijn vol: de actie staat in de wachtrij voor beurt ${turn}.`, 'ok');
+      return true;
     }
     const draft = [...this.state.draft];
     draft[slot] = action;
@@ -416,16 +506,56 @@ export class GameStore {
     return true;
   }
 
-  /** Puts actions in the free slots (in order). Returns the slots used; actions that don't fit are dropped. */
-  addActions(actions: Action[]): number[] {
+  /**
+   * Puts actions in the free slots (in order); what doesn't fit goes to the end of the queue for the next
+   * turns. Returns the slots used and how many were queued, or null when the queue has no room.
+   */
+  addActions(actions: Action[]): { slots: number[]; queued: number } | null {
     const free = this.freeSlots();
     const used = free.slice(0, actions.length);
-    if (used.length === 0) return used;
+    const rest = actions.slice(used.length);
+    if (rest.length > this.queueRoom()) {
+      this.toast(`Dat past niet meer in de wachtrij (max. ${MAX_QUEUED_ACTIONS} acties). Maak de route korter of wis eerst iets.`, 'error');
+      return null;
+    }
     const draft = [...this.state.draft];
     used.forEach((slot, k) => (draft[slot] = actions[k]));
-    this.setDraft(draft);
+    this.setPlan({ ...(used.length ? { draft } : {}), ...(rest.length ? { queue: [...this.state.queue, ...rest] } : {}) });
     this.set({ highlightSlot: null });
-    return used;
+    return { slots: used, queued: rest.length };
+  }
+
+  /** Removes queued actions from..to (inclusive). */
+  removeQueued(from: number, to: number = from): void {
+    this.setPlan({ queue: this.state.queue.filter((_, i) => i < from || i > to) });
+  }
+
+  /** Moves a group of queued actions (a route, or one action) before the previous / after the next group. */
+  moveQueued(start: number, end: number, delta: -1 | 1): void {
+    const queue = [...this.state.queue];
+    const groups = slotGroups(queue);
+    const at = groups.findIndex((g) => g.start === start && g.end === end);
+    const other = groups[at + delta];
+    if (at < 0 || !other) return;
+    const block = queue.splice(start, end - start + 1);
+    queue.splice(delta < 0 ? other.start : other.end - block.length + 1, 0, ...block);
+    this.setPlan({ queue });
+  }
+
+  clearQueue(): void {
+    this.setPlan({ queue: [] });
+  }
+
+  /** Free slots of this turn get the first actions of the queue. */
+  pullQueue(): void {
+    const free = this.freeSlots();
+    const n = Math.min(free.length, this.state.queue.length);
+    if (n === 0) return;
+    const draft = [...this.state.draft];
+    // Like new actions: after the last planned action first (so they run after what they may build on).
+    free.slice(0, n).forEach((slot, k) => (draft[slot] = this.state.queue[k]));
+    this.setPlan({ draft, queue: this.state.queue.slice(n) });
+    this.toast(`${n} actie${n > 1 ? 's' : ''} uit de wachtrij naar deze beurt gehaald.`, 'ok');
   }
 
   clearSlots(): void {
@@ -461,13 +591,13 @@ export class GameStore {
   }
 
   async save(): Promise<void> {
-    const { identity, gameId, draft, ready } = this.state;
+    const { identity, gameId, draft, ready, queue } = this.state;
     if (!identity) return;
     window.clearTimeout(this.saveTimer);
     this.set({ sync: 'saving' });
     try {
-      await api.setOrders(gameId, identity.token, draft, ready);
-      if (this.state.draft === draft && this.state.ready === ready) this.set({ sync: 'saved' });
+      await api.setOrders(gameId, identity.token, draft, ready, queue);
+      if (this.state.draft === draft && this.state.ready === ready && this.state.queue === queue) this.set({ sync: 'saved' });
       else this.saveTimer = window.setTimeout(() => void this.save(), 300);
     } catch (err) {
       this.set({ sync: 'error' });
@@ -592,18 +722,19 @@ export class GameStore {
       this.set({ tool: { kind: 'inspect' } });
       return;
     }
-    const used = this.addActions(actions);
-    if (used.length === 0) {
-      this.toast(`Alle ${this.slotCount()} actieslots zijn gevuld. Verwijder eerst een actie.`, 'error');
-      return;
-    }
+    const queuedFrom = this.state.queue.length;
+    const result = this.addActions(actions);
+    if (!result) return;
+    const { slots: used, queued } = result;
     const name = TRANSPORT[tool.transport].name;
     const slots = used.length === 1 ? `slot ${used[0] + 1}` : `slots ${Math.min(...used) + 1}–${Math.max(...used) + 1}`;
-    if (used.length < actions.length) {
-      this.toast(
-        `${name}: ${used.length} van de ${actions.length} acties gepland (${slots}). De rest past niet meer in deze beurt; plan die volgende beurt vanaf het eind.`,
-        'info',
-      );
+    const first = this.queueTurn(queuedFrom);
+    const last = this.queueTurn(queuedFrom + queued - 1);
+    const turns = first === last ? `beurt ${first}` : `beurt ${first}–${last}`;
+    if (queued > 0 && used.length > 0) {
+      this.toast(`${name}: ${used.length} acties deze beurt (${slots}), de andere ${queued} staan in de wachtrij voor ${turns}.`, 'ok');
+    } else if (queued > 0) {
+      this.toast(`${name}: alle slots zijn vol, dus de ${queued} acties staan in de wachtrij voor ${turns}.`, 'ok');
     } else {
       this.toast(`${name} gepland: ${actions.length} actie${actions.length > 1 ? 's' : ''} in ${slots}.`, 'ok');
     }
@@ -761,6 +892,12 @@ const ROUTE_ERRORS: Record<RoutePointError, (first: boolean, reason: string | nu
 
 /** How long a tile or industry lights up after jumping to it from a list. */
 export const FLASH_MS = 2600;
+
+export interface QueueCheck {
+  cost: number;
+  /** Why it would (partly) fail if nothing changes, e.g. a tile taken by another player. */
+  problem: string | null;
+}
 
 /** A vehicle model for a station kind, preferably one that carries the same (freight or passengers). */
 export function defaultModel(kind: StationKind, carries: 'cargo' | 'passengers' = 'cargo'): VehicleModelId {

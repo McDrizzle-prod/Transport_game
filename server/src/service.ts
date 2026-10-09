@@ -18,7 +18,9 @@ import {
   repayLoan,
   resolveTurn,
   sanitizeOrders,
+  sanitizeQueue,
   startGame,
+  takeFromQueue,
   takeLoan,
 } from '@transport/shared';
 import type {
@@ -158,7 +160,9 @@ export class GameService {
     return {
       game: game.state,
       you: player ? { playerId: player.id, isHost: player.isHost, hasPin: !!game.pins?.[player.id] } : null,
-      orders: player ? (game.orders[player.id] ?? { slots: emptySlots(game.state.settings.actionSlots), ready: false, updatedAt: 0 }) : null,
+      orders: player
+        ? { queue: [], ...(game.orders[player.id] ?? { slots: emptySlots(game.state.settings.actionSlots), ready: false, updatedAt: 0 }) }
+        : null,
       ready: Object.fromEntries(game.state.players.map((p) => [p.id, game.orders[p.id]?.ready ?? false])),
       lastReportTurn: game.reports.length ? game.reports[game.reports.length - 1].turn : null,
       serverTime: this.now(),
@@ -190,7 +194,7 @@ export class GameService {
     console.log(`[game ${game.state.id}] started with ${game.state.players.length} player(s)`);
   }
 
-  setOrders(id: string, token: string | null, body: { slots?: unknown; ready?: unknown }): void {
+  setOrders(id: string, token: string | null, body: { slots?: unknown; ready?: unknown; queue?: unknown }): void {
     const game = this.game(id);
     const playerId = this.requirePlayer(game, token);
     if (game.state.phase !== 'running') throw new ApiError(409, 'not_running');
@@ -198,7 +202,13 @@ export class GameService {
     if (player.hq === null) throw new ApiError(409, 'no_hq');
     const result = sanitizeOrders(game.map, body?.slots, game.state.settings.actionSlots);
     if (!result.ok) throw new ApiError(400, result.error);
-    game.orders[playerId] = { slots: result.slots, ready: body?.ready === true, updatedAt: this.now() };
+    let queue = game.orders[playerId]?.queue ?? [];
+    if (body?.queue !== undefined) {
+      const q = sanitizeQueue(game.map, body.queue);
+      if (!q.ok) throw new ApiError(400, q.error);
+      queue = q.queue;
+    }
+    game.orders[playerId] = { slots: result.slots, queue, ready: body?.ready === true, updatedAt: this.now() };
     this.changed(game.state.id);
   }
 
@@ -291,7 +301,13 @@ export class GameService {
       game.state = state;
       game.reports.push(report);
       if (game.reports.length > REPORTS_KEPT) game.reports.splice(0, game.reports.length - REPORTS_KEPT);
-      game.orders = {};
+      // Queued actions (e.g. the rest of a long route) fill the slots of the new turn.
+      const next: StoredGame['orders'] = {};
+      for (const [player, o] of Object.entries(game.orders)) {
+        if (!o.queue?.length) continue;
+        next[player] = { ...takeFromQueue(o.queue, state.settings.actionSlots), ready: false, updatedAt: now };
+      }
+      game.orders = next;
       console.log(`[game ${id}] turn ${report.turn} executed in ${(performance.now() - started).toFixed(0)} ms`);
     } catch (err) {
       // Never retry a crashing turn in a tight loop: try again in 5 minutes.

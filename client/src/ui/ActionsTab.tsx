@@ -28,6 +28,7 @@ export function ActionsTab() {
       {tool.kind === 'station' && <StationToolPanel />}
       {tool.kind === 'vehicles' && <VehicleToolPanel />}
       <SlotList />
+      <QueueList />
     </>
   );
 }
@@ -70,9 +71,9 @@ function SlotList() {
         <span className={`sync ${sync}`}>{SYNC_TEXT[sync]}</span>
       </div>
       <p className="hint">
-        {used} van {draft.length} acties gebruikt. Elk stuk weg, spoor of kanaal (van tegel naar tegel) en elk station kost 1 actie. Slot 1 gaat
-        eerst, tegelijk met slot 1 van alle andere spelers: bouwen twee spelers op dezelfde tegel, dan wint het laagste slot; bij hetzelfde slot
-        delen ze de tegel.
+        {used} van {draft.length} acties gebruikt. Elk stuk weg, spoor of kanaal (van tegel naar tegel) en elk station kost 1 actie; wat niet past,
+        gaat in de wachtrij voor de volgende beurten. Slot 1 gaat eerst, tegelijk met slot 1 van alle andere spelers: bouwen twee spelers op
+        dezelfde tegel, dan wint het laagste slot; bij hetzelfde slot delen ze de tegel.
       </p>
       <ol className="slots">
         {slotGroups(draft).map((g) => {
@@ -133,6 +134,133 @@ function SlotList() {
         </button>
       )}
       <p className="muted small">Je acties worden automatisch op de server bewaard; je kunt ze tot de uitvoering aanpassen.</p>
+    </section>
+  );
+}
+
+/** The queue: actions for the next turns (one route per row), in the order they will fill the slots. */
+function QueueList() {
+  const store = useStore();
+  const queue = useUi((s) => s.queue);
+  useUi((s) => s.draft);
+  const width = useUi((s) => s.map!.width);
+  const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
+  if (queue.length === 0) return null;
+  const free = store.freeSlots().length;
+  const checks = store.queueChecks();
+  const groups = slotGroups(queue);
+  const turns = (from: number, to: number) => {
+    const [a, b] = [store.queueTurn(from), store.queueTurn(to)];
+    return a === b ? String(a) : `${a}–${b}`;
+  };
+  const toggle = (start: number) => {
+    const next = new Set(open);
+    if (!next.delete(start)) next.add(start);
+    setOpen(next);
+  };
+  const focus = (a: Action) => {
+    const tile = store.actionTile(a);
+    if (tile !== null) store.focusTile(tile, true);
+  };
+  return (
+    <section className="panel-section queue">
+      <div className="section-head">
+        <h3>⏭ Wachtrij · volgende beurten</h3>
+        <span className="badge queued">{queue.length} acties</span>
+      </div>
+      <p className="hint">
+        Deze acties komen vanzelf in je actieslots zodra een beurt is uitgevoerd: {store.slotCount()} per beurt, van boven naar beneden. Verander de
+        volgorde met ▲▼ of haal iets weg met ✕.
+      </p>
+      {free > 0 && (
+        <button className="secondary wide" onClick={() => store.pullQueue()}>
+          ⤴ {Math.min(free, queue.length)} actie{Math.min(free, queue.length) > 1 ? 's' : ''} naar deze beurt (vrije slots)
+        </button>
+      )}
+      <ol className="slots queue-list">
+        {groups.map((g, gi) => {
+          const first = queue[g.start];
+          const indices = Array.from({ length: g.end - g.start + 1 }, (_, k) => g.start + k);
+          const cost = indices.reduce((sum, i) => sum + (checks[i]?.cost ?? 0), 0);
+          const problems = [...new Set(indices.map((i) => checks[i]?.problem).filter((p): p is string => !!p))];
+          const isRoute = g.end > g.start && first.type === 'build';
+          const path = isRoute ? groupPath(queue, g) : [];
+          const expanded = open.has(g.start);
+          return [
+            <li key={`q${g.start}`} className={`slot queued ${problems.length ? 'partial' : ''}`} onClick={() => focus(queue[Math.floor((g.start + g.end) / 2)])}>
+              <span className="slot-num range" title="Beurt waarin dit wordt uitgevoerd">
+                B{turns(g.start, g.end)}
+              </span>
+              <div className="slot-body">
+                <div className="slot-title">
+                  {isRoute && first.type === 'build'
+                    ? `${TRANSPORT_ICON[first.kind]} ${TRANSPORT[first.kind].name} ${tileLabel(path[0], width)} → ${tileLabel(path[path.length - 1], width)}`
+                    : actionTitle(first, width)}
+                </div>
+                <div className="slot-sub">
+                  <span>
+                    Beurt {turns(g.start, g.end)}
+                    {isRoute && ` · ${num(indices.length)} stukken = ${num(indices.length)} acties`} · {cost < 0 ? `${money(-cost)} terug` : `≈ ${money(cost)}`}
+                  </span>
+                </div>
+                {problems.length > 0 && (
+                  <ul className="slot-msgs">
+                    {problems.slice(0, 2).map((p) => (
+                      <li key={p}>⚠ {p}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="slot-actions" onClick={(e) => e.stopPropagation()}>
+                <button className="icon-btn" title="Eerder" aria-label="Eerder" disabled={gi === 0} onClick={() => store.moveQueued(g.start, g.end, -1)}>
+                  ▲
+                </button>
+                <button
+                  className="icon-btn"
+                  title="Later"
+                  aria-label="Later"
+                  disabled={gi === groups.length - 1}
+                  onClick={() => store.moveQueued(g.start, g.end, 1)}
+                >
+                  ▼
+                </button>
+                {isRoute && (
+                  <button className="icon-btn" title={expanded ? 'Inklappen' : 'Per stuk tonen'} aria-label={expanded ? 'Inklappen' : 'Per stuk tonen'} onClick={() => toggle(g.start)}>
+                    {expanded ? '▴' : '▾'}
+                  </button>
+                )}
+                <button
+                  className="icon-btn danger"
+                  title={isRoute ? 'Hele route uit de wachtrij' : 'Uit de wachtrij'}
+                  aria-label={isRoute ? 'Hele route uit de wachtrij' : 'Uit de wachtrij'}
+                  onClick={() => store.removeQueued(g.start, g.end)}
+                >
+                  ✕
+                </button>
+              </div>
+            </li>,
+            ...(isRoute && expanded
+              ? indices.map((i) => (
+                  <li key={`q${g.start}-${i}`} className="slot queued sub" onClick={() => focus(queue[i])}>
+                    <span className="slot-num range">B{store.queueTurn(i)}</span>
+                    <div className="slot-body">
+                      <div className="slot-title small">{actionTitle(queue[i], width)}</div>
+                      {checks[i]?.problem && <div className="slot-msgs">⚠ {checks[i].problem}</div>}
+                    </div>
+                    <div className="slot-actions" onClick={(e) => e.stopPropagation()}>
+                      <button className="icon-btn danger" title="Dit stuk uit de wachtrij" aria-label="Dit stuk uit de wachtrij" onClick={() => store.removeQueued(i)}>
+                        ✕
+                      </button>
+                    </div>
+                  </li>
+                ))
+              : []),
+          ];
+        })}
+      </ol>
+      <button className="link small" onClick={() => store.clearQueue()}>
+        Wachtrij wissen
+      </button>
     </section>
   );
 }
@@ -246,18 +374,24 @@ function SlotRow({ index, action, result, highlighted }: { index: number; action
         )}
       </div>
       <div className="slot-actions" onClick={(e) => e.stopPropagation()}>
-        <button className="icon-btn" title="Eerder uitvoeren" disabled={index === 0} onClick={() => store.moveSlot(index, -1)}>
+        <button className="icon-btn" title="Eerder uitvoeren" aria-label="Eerder uitvoeren" disabled={index === 0} onClick={() => store.moveSlot(index, -1)}>
           ▲
         </button>
-        <button className="icon-btn" title="Later uitvoeren" disabled={index === store.slotCount() - 1} onClick={() => store.moveSlot(index, 1)}>
+        <button
+          className="icon-btn"
+          title="Later uitvoeren"
+          aria-label="Later uitvoeren"
+          disabled={index === store.slotCount() - 1}
+          onClick={() => store.moveSlot(index, 1)}
+        >
           ▼
         </button>
         {(action.type === 'station' || action.type === 'vehicles') && (
-          <button className="icon-btn" title="Bewerken" onClick={() => store.editSlot(index)}>
+          <button className="icon-btn" title="Bewerken" aria-label="Bewerken" onClick={() => store.editSlot(index)}>
             ✎
           </button>
         )}
-        <button className="icon-btn danger" title="Verwijderen" onClick={() => store.removeSlot(index)}>
+        <button className="icon-btn danger" title="Verwijderen" aria-label="Verwijderen" onClick={() => store.removeSlot(index)}>
           ✕
         </button>
       </div>

@@ -1,4 +1,5 @@
 import type {
+  Action,
   ClientView,
   CreateGameRequest,
   GameSummary,
@@ -58,8 +59,8 @@ export const api = {
   report: (id: string, turn: number) => call<TurnReport>('GET', `/api/games/${id}/reports/${turn}`),
   placeHq: (id: string, token: string, tile: number) => call('POST', `/api/games/${id}/hq`, { tile }, token),
   start: (id: string, token: string) => call('POST', `/api/games/${id}/start`, {}, token),
-  setOrders: (id: string, token: string, slots: OrderSlots, ready: boolean) =>
-    call('PUT', `/api/games/${id}/orders`, { slots, ready }, token),
+  setOrders: (id: string, token: string, slots: OrderSlots, ready: boolean, queue: Action[]) =>
+    call('PUT', `/api/games/${id}/orders`, { slots, ready, queue }, token),
   resolve: (id: string, token: string) => call('POST', `/api/games/${id}/resolve`, {}, token),
   alliance: (id: string, token: string, action: 'invite' | 'accept' | 'decline' | 'leave', player?: string) =>
     call('POST', `/api/games/${id}/alliance`, { action, player }, token),

@@ -98,4 +98,8 @@ export interface Scene {
   auctions: Set<number>;
   /** A tile or industry lighting up after jumping to it from a list; `t` runs from 0 to 1. */
   flash: { tile: number; t: number } | null;
+  /** Pairs of station tiles (own or allied) within reach of each other: freight can be handed over (transshipment). */
+  transferLinks: [number, number][];
+  /** The player's queue for the next turns: segments and station tiles (drawn faintly). */
+  queued: { edges: Edge[]; stations: number[] };
 }

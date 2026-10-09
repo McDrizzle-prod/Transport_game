@@ -10,12 +10,15 @@ export interface SlotGroup {
 
 const isBuild = (a: Action | null | undefined): a is BuildAction => a?.type === 'build';
 
+/** Consecutive segments of the same kind that touch each other belong to one route. */
+const continues = (prev: Action | null | undefined, a: Action | null | undefined): boolean =>
+  isBuild(a) && isBuild(prev) && prev.kind === a.kind && prev.path.some((t) => a.path.includes(t));
+
 export function slotGroups(slots: OrderSlots): SlotGroup[] {
   const groups: SlotGroup[] = [];
   slots.forEach((a, i) => {
-    const prev = slots[i - 1];
     const last = groups[groups.length - 1];
-    if (isBuild(a) && isBuild(prev) && prev.kind === a.kind && last?.end === i - 1) last.end = i;
+    if (continues(slots[i - 1], a) && last?.end === i - 1) last.end = i;
     else groups.push({ start: i, end: i });
   });
   return groups;

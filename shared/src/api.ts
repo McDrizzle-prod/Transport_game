@@ -50,6 +50,8 @@ export interface ClientView {
 export interface SetOrdersRequest {
   slots: unknown[];
   ready: boolean;
+  /** Actions for the next turns; left out = keep the queue as it is. */
+  queue?: unknown[];
 }
 
 export interface LoanRequest {

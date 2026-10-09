@@ -145,6 +145,17 @@ export interface InfraState {
   edges: Record<string, Edge>;
 }
 
+/** One part of a journey with transshipment: the cargo rode a line from one station to another. */
+export interface CargoLeg {
+  player: PlayerId;
+  line: number;
+  /** Station ids. */
+  from: number;
+  to: number;
+  /** Straight-line distance between the two stations (tiles); the revenue of the journey is split by it. */
+  distance: number;
+}
+
 export interface CargoLot {
   cargo: CargoId;
   amount: number;
@@ -153,6 +164,8 @@ export interface CargoLot {
    * or a city id for passengers.
    */
   origin: number;
+  /** Earlier legs of freight that was handed over from another line (transshipment). */
+  legs?: CargoLeg[];
 }
 
 export interface Station {
@@ -169,6 +182,8 @@ export interface LineStats {
   trips: number;
   revenue: number;
   delivered: CargoAmounts;
+  /** Handed over to another line at the other station (transshipment). */
+  transferred?: CargoAmounts;
 }
 
 export interface Line {
@@ -359,6 +374,11 @@ export type OrderSlots = (Action | null)[];
 
 export interface PlayerOrders {
   slots: OrderSlots;
+  /**
+   * Actions for the next turns, in order (e.g. the rest of a long route). When a turn has been executed,
+   * the first ones fill the slots of the new turn.
+   */
+  queue?: Action[];
   ready: boolean;
   updatedAt: number;
 }
@@ -404,8 +424,14 @@ export interface Delivery {
   player: PlayerId;
   lineId: number;
   cargo: CargoId;
+  /** Delivered to a customer. */
   amount: number;
-  /** Revenue including the headquarters bonus, before tolls. */
+  /** Handed over to another line (transshipment); paid for when the cargo reaches its customer. */
+  transferred?: number;
+  /**
+   * Revenue including the headquarters bonus, before tolls. With transshipment every line of the journey
+   * gets its part (by distance) when the cargo reaches the customer.
+   */
   revenue: number;
   /** Part of the revenue that is headquarters bonus. */
   bonus: number;
@@ -431,6 +457,8 @@ export interface ReplayEvent {
   cargo: CargoId;
   amount: number;
   revenue: number;
+  /** The cargo was handed over to another line here (no revenue yet). */
+  transfer?: boolean;
 }
 
 export interface AuctionResult {

@@ -187,6 +187,7 @@ function Deliveries({ report }: { report: TurnReport }) {
   for (const d of report.deliveries) totals.set(d.player, (totals.get(d.player) ?? 0) + d.revenue);
   const bonus = mine.reduce((s, d) => s + (d.bonus ?? 0), 0);
   const tolls = mine.reduce((s, d) => s + (d.toll ?? 0), 0);
+  const transfers = mine.some((d) => (d.transferred ?? 0) > 0);
   return (
     <>
       <h4>Leveringen</h4>
@@ -207,7 +208,13 @@ function Deliveries({ report }: { report: TurnReport }) {
               <tr key={i}>
                 <td className="small">{lineName(d.lineId)}</td>
                 <td>
-                  {CARGO[d.cargo].icon} {num(d.amount)}
+                  {d.amount > 0 && `${CARGO[d.cargo].icon} ${num(d.amount)}`}
+                  {(d.transferred ?? 0) > 0 && (
+                    <span className="transfer" title="Overgeslagen naar een andere lijn">
+                      {d.amount > 0 ? ' · ' : ''}
+                      {CARGO[d.cargo].icon} {num(d.transferred ?? 0)} ⇄
+                    </span>
+                  )}
                 </td>
                 <td>{d.trips}</td>
                 <td>
@@ -218,6 +225,12 @@ function Deliveries({ report }: { report: TurnReport }) {
             ))}
           </tbody>
         </table>
+      )}
+      {transfers && (
+        <p className="small muted">
+          ⇄ = overgeslagen naar een andere lijn. Die vracht levert geld op zodra ze bij de klant is; dan krijgt elke lijn een deel naar de
+          afstand die ze aflegde.
+        </p>
       )}
       {(bonus > 0 || tolls > 0) && (
         <p className="small">
