@@ -26,6 +26,9 @@
 | **Testronde 2:** maximaal 3 veilingen tegelijk; pas na afloop een nieuwe | ✅ |
 | **Testronde 2:** eigen aandelen zichtbaar op de kaart | ✅ groene gloed + "2/10"; ook 🔨 bij veilingen en 🔒 bij een meerderheid van een ander |
 | **Testronde 2:** gele gloed bij het springen naar een industrie vanuit de veilingen | ✅ ook bij tegels uit het rapport |
+| **Testronde 3:** nieuwe spelers landen op de meedoen-pagina, niet op de kaart | ✅ een spellink zonder bedrijf opent het meedoen-formulier; het startscherm begint met meedoen |
+| **Testronde 3:** wegen op mobiel: punt A, punt B, voorbeeld, groen vinkje | ✅ voor muis én touch; slepen tekent niet meer (dat legde wegen waar je de kaart verschoof) |
+| **Testronde 3:** meespelen buiten je wifi (tot 6 spelers) | ✅ `npm run online` (gratis Cloudflare-tunnel vanaf je eigen computer) + pincode om verder te spelen |
 | Veilingen voor aandelen in industrieën (exclusief gebruik / winstdeling) | ✅ basisversie, zie hieronder |
 | Schulden → gedwongen verkoop van eigen aandelen → laatste alliantie wint | 🟡 leningen zijn er; aandelen van bedrijven en het eindspel nog niet |
 
@@ -122,6 +125,10 @@ afhandeling in `closeAuctions`, grafiek van de bedrijfswaarde in het tabblad Beu
 
 ## Techniek
 
+- **Vast online** (altijd bereikbaar, ook als de computer van de host uit staat): het spel op een kleine server in
+  de cloud zetten, bv. een VPS of Fly.io/Railway met een blijvende schijf voor `DATA_DIR`, of een eigen domein met
+  een vaste Cloudflare-tunnel. Dat vraagt een account en een paar euro per maand; graag samen kiezen wanneer de
+  playtests daarom vragen.
 - **Accounts** (bv. e-mail-link) in plaats van alleen een token in de browser, zodat je op elk apparaat verder kunt.
 - **Pushmeldingen** (Web Push) bij een uitgevoerde beurt, een alliantievoorstel, een overboden bod of een aflopende
   deadline.
@@ -142,8 +149,10 @@ afhandeling in `closeAuctions`, grafiek van de bedrijfswaarde in het tabblad Beu
 - Spellen uit de vorige versie kunnen worden geladen, maar zijn gemaakt met de oude kaart (industrieën dichter
   bij elkaar); begin voor de nieuwe regels een nieuw spel.
 - Na de uitvoering zijn de acties van iedereen in het rapport te zien (bewust: zo zie je wat er gebeurde).
-- Spelers identificeren zich met een token in de browser; wie dat kwijtraakt (andere browser, gewist geheugen),
-  kan niet meer als dat bedrijf spelen.
+- Spelers identificeren zich met een token in de browser, en met naam + pincode op een ander apparaat. Spelers
+  die meededen vóór de pincode bestond, stellen er een in via het tabblad Spelers.
+- `npm run online` geeft elke keer een nieuwe link en werkt alleen als de computer van de host aan staat. Voor een
+  vaste link: zie *Vast online* bij Techniek.
 
 ## Open vragen voor de volgende iteratie
 

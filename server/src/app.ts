@@ -13,6 +13,8 @@ export interface AppOptions {
   now?: () => number;
   /** How often to check for turns that are due (ms). */
   tickMs?: number;
+  /** Public address of the server (e.g. a tunnel), shown in invite links. */
+  publicUrl?: string | null;
 }
 
 export interface App {
@@ -26,7 +28,7 @@ export async function createApp(options: AppOptions): Promise<App> {
   const store = new GameStore(options.dataDir);
   await store.load();
   const service = new GameService(store, options.now);
-  const handler = createHttpHandler(service, options.clientDist);
+  const handler = createHttpHandler(service, options.clientDist, { publicUrl: options.publicUrl, now: options.now });
   const server = createServer((req, res) => void handler(req, res));
   const ws = attachWebSocket(server, service);
   const ticker = setInterval(() => service.tick(), options.tickMs ?? 1000);

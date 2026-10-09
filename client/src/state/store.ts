@@ -9,7 +9,7 @@ import {
   checkRouteTile,
   checkStationTile,
   emptySlots,
-  extendRoutePath,
+  addRoutePoint,
   hqError,
   planBuild,
   previewOrders,
@@ -22,6 +22,7 @@ import type {
   OrdersPreview,
   Player,
   RoutePlan,
+  RoutePointError,
   Station,
   StationKind,
   TransportKind,
@@ -40,10 +41,11 @@ export type ToolState =
   | { kind: 'inspect' }
   | { kind: 'hq' }
   /**
-   * Click the start, then the route follows the pointer (or a tap on the end draws a straight line); the
-   * next click puts it in the free slots (one action per segment) and the tool closes. `path[0]` is the start.
+   * Tap point A, then B (and more points if you like): the route runs in straight lines between them and is
+   * shown as a preview. Only the ✓ puts it in the free slots (one action per segment). `path[0]` is the start;
+   * `points` are the indices in `path` of the tapped points.
    */
-  | { kind: 'route'; transport: TransportKind; path: number[]; stationStart: boolean; stationEnd: boolean }
+  | { kind: 'route'; transport: TransportKind; path: number[]; points: number[]; stationStart: boolean; stationEnd: boolean }
   | { kind: 'station'; station: StationKind; tile: number | null; editSlot: number | null }
   | {
       kind: 'vehicles';
@@ -114,6 +116,7 @@ export class GameStore {
   private memoWorld: { key: unknown[]; value: World } | null = null;
   private memoPreview: { key: unknown[]; value: OrdersPreview } | null = null;
   private memoPlanning = new Map<number, { key: unknown[]; value: World }>();
+  private memoGhost: { key: unknown[]; value: number[] | null } | null = null;
   private readonly routeCache = new Map<string, RoutePlan>();
   private readonly worldIds = new WeakMap<World, number>();
 
@@ -316,14 +319,54 @@ export class GameStore {
     return plan;
   }
 
-  /** Extends the drawn route to a tile (pointer moved there). */
-  extendRoute(tile: number): void {
+  /** A tap with the route tool: the start, the next point, or a point on the route to go back to. */
+  addRoutePoint(tile: number): void {
     const tool = this.state.tool;
     const world = this.planningWorld();
     const me = this.state.view?.you?.playerId;
-    if (tool.kind !== 'route' || tool.path.length === 0 || !world || !me) return;
-    const path = extendRoutePath(world, me, tool.transport, tool.path, tile);
-    if (path !== tool.path) this.set({ tool: { ...tool, path } });
+    if (tool.kind !== 'route' || !world || !me) return;
+    const back = tool.path.indexOf(tile);
+    if (back >= 0 && back === tool.path.length - 1) return;
+    if (back >= 0) {
+      // A tap on the route takes it back to that tile.
+      this.set({ tool: { ...tool, path: tool.path.slice(0, back + 1), points: [...tool.points.filter((i) => i < back), back] } });
+      return;
+    }
+    const result = addRoutePoint(world, me, tool.transport, tool.path, tile);
+    if (!result.ok) {
+      const check = checkRouteTile(world, me, tool.transport, tile);
+      const reason = !check.ok ? reasonText(check.reason) : null;
+      this.toast(ROUTE_ERRORS[result.error](tool.path.length === 0, reason), 'error');
+      return;
+    }
+    this.set({ tool: { ...tool, path: result.path, points: [...tool.points, result.path.length - 1] } });
+    if (result.detour) this.toast('Er ligt iets in de weg: de route gaat eromheen. Kijk of de ligging zo goed is.', 'info');
+  }
+
+  /** Takes the last tapped point back. */
+  undoRoutePoint(): void {
+    const tool = this.state.tool;
+    if (tool.kind !== 'route') return;
+    if (tool.points.length <= 1) {
+      this.set({ tool: { ...tool, path: [], points: [] } });
+      return;
+    }
+    const prev = tool.points[tool.points.length - 2];
+    this.set({ tool: { ...tool, path: tool.path.slice(0, prev + 1), points: tool.points.slice(0, -1) } });
+  }
+
+  /** Preview (with a mouse) of the piece the next click would add: from the end of the route to the hovered tile. */
+  routeGhost(): number[] | null {
+    const { tool, hover } = this.state;
+    const world = this.planningWorld();
+    const me = this.state.view?.you?.playerId;
+    if (tool.kind !== 'route' || tool.path.length === 0 || hover === null || !world || !me || tool.path.includes(hover)) return null;
+    const key = [world, tool.path, hover];
+    if (this.memoGhost && same(this.memoGhost.key, key)) return this.memoGhost.value;
+    const result = addRoutePoint(world, me, tool.transport, tool.path, hover);
+    const value = result.ok ? result.path.slice(tool.path.length - 1) : null;
+    this.memoGhost = { key, value };
+    return value;
   }
 
   /** The actions a planned route becomes: one per segment that needs building, plus the chosen stations. */
@@ -458,10 +501,7 @@ export class GameStore {
   }
 
   setHover(hover: number | null): void {
-    if (hover === this.state.hover) return;
-    this.set({ hover });
-    // The route tool draws along the tiles the mouse passes.
-    if (hover !== null && this.state.tool.kind === 'route') this.extendRoute(hover);
+    if (hover !== this.state.hover) this.set({ hover });
   }
 
   tapTile(tile: number, at?: TapPoint): void {
@@ -473,26 +513,9 @@ export class GameStore {
       case 'hq':
         void this.placeHq(tile);
         return;
-      case 'route': {
-        if (tool.path.length === 0) {
-          const world = this.planningWorld();
-          const me = this.state.view?.you?.playerId;
-          const check = world && me ? checkRouteTile(world, me, tool.transport, tile) : null;
-          if (check && !check.ok) {
-            this.toast(`Hier kun je niet beginnen: ${reasonText(check.reason)}`, 'error');
-            return;
-          }
-          this.set({ tool: { ...tool, path: [tile] } });
-          return;
-        }
-        // A click on the start point again starts over from there.
-        if (tile === tool.path[0]) {
-          if (tool.path.length > 1) this.set({ tool: { ...tool, path: [tile] } });
-          return;
-        }
-        this.placeRoute(tile);
+      case 'route':
+        this.addRoutePoint(tile);
         return;
-      }
       case 'station':
         this.set({ tool: { ...tool, tile } });
         return;
@@ -554,18 +577,11 @@ export class GameStore {
     return best;
   }
 
-  /** Last click of the route tool: put the drawn route in the free slots, one action per segment. */
-  placeRoute(end: number): void {
+  /** The ✓ of the route tool: put the route in the free slots, one action per segment. */
+  confirmRoute(): void {
     const tool = this.state.tool;
     if (tool.kind !== 'route') return;
-    // On touch screens there is no pointer trail: the tap on the end draws a straight line to it.
-    this.extendRoute(end);
     const plan = this.routePlan();
-    const current = this.state.tool;
-    if (current.kind === 'route' && current.path[current.path.length - 1] !== end) {
-      this.toast(errorText('unreachable'), 'error');
-      return;
-    }
     if (!plan?.path || !plan.plan || plan.plan.fatal) {
       this.toast(plan?.plan?.fatal ? msgText(plan.plan.fatal) : errorText('unreachable'), 'error');
       return;
@@ -687,6 +703,19 @@ export class GameStore {
     }
   }
 
+  async setPin(pin: string): Promise<boolean> {
+    const { identity, gameId } = this.state;
+    if (!identity) return false;
+    try {
+      await api.setPin(gameId, identity.token, pin);
+      this.toast('Pincode opgeslagen', 'ok');
+      return true;
+    } catch (err) {
+      this.toast(errorText(err instanceof ApiError ? err.code : 'network'), 'error');
+      return false;
+    }
+  }
+
   async loan(action: 'take' | 'repay', amount: number): Promise<void> {
     const { identity, gameId } = this.state;
     if (!identity) return;
@@ -722,6 +751,13 @@ export class GameStore {
     }
   }
 }
+
+const ROUTE_ERRORS: Record<RoutePointError, (first: boolean, reason: string | null) => string> = {
+  blocked: (first, reason) => `${first ? 'Hier kun je niet beginnen' : 'Daar kan de route niet komen'}${reason ? `: ${reason}` : ''}`,
+  unreachable: () => 'Daar kom je niet: er ligt iets in de weg dat niet te omzeilen is.',
+  crossing: () => 'De route kan zichzelf niet kruisen. Kies een ander punt, of tik op de route om terug te gaan.',
+  too_long: () => 'Te lang in één keer: plan de route in delen.',
+};
 
 /** How long a tile or industry lights up after jumping to it from a list. */
 export const FLASH_MS = 2600;

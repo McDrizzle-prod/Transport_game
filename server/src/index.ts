@@ -7,9 +7,11 @@ const host = process.env.HOST ?? '0.0.0.0';
 const dataDir = process.env.DATA_DIR ?? fileURLToPath(new URL('../data', import.meta.url));
 const clientDist = process.env.CLIENT_DIST ?? fileURLToPath(new URL('../../client/dist', import.meta.url));
 
-const app = await createApp({ dataDir, clientDist });
+const publicUrl = process.env.PUBLIC_URL?.replace(/\/$/, '') || null;
+
+const app = await createApp({ dataDir, clientDist, publicUrl });
 app.server.listen(port, host, () => {
-  console.log(`Transport game server on http://localhost:${port} (data: ${dataDir})`);
+  console.log(`Transport game server on http://localhost:${port} (data: ${dataDir})${publicUrl ? ` · online: ${publicUrl}` : ''}`);
 });
 
 let stopping = false;

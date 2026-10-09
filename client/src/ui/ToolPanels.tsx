@@ -48,9 +48,6 @@ function FreeSlots() {
   return <span className={`badge ${free ? 'slotbadge' : 'failed'}`}>{free ? `${free} vrije acties` : 'alle slots vol'}</span>;
 }
 
-/** Devices with a mouse draw routes by hovering; touch screens tap or drag. */
-const canHover = () => typeof window !== 'undefined' && window.matchMedia('(hover: hover)').matches;
-
 export function RouteToolPanel() {
   const store = useStore();
   const tool = useUi((s) => s.tool);
@@ -62,7 +59,6 @@ export function RouteToolPanel() {
   const stationKind = TRANSPORT[tool.transport].station;
   const blocked = plan?.plan?.blocked ?? [];
   const name = TRANSPORT[tool.transport].name.toLowerCase();
-  const end = tool.path[tool.path.length - 1];
 
   return (
     <section className="panel-section tool-panel">
@@ -72,16 +68,16 @@ export function RouteToolPanel() {
         </h3>
         <FreeSlots />
       </div>
-      <p className="hint">
-        {tool.path.length === 0
-          ? `${canHover() ? 'Klik' : 'Tik'} op de tegel waar je ${name} moet beginnen.`
-          : canHover()
-            ? `Beweeg de muis over de tegels waar je ${name} moet komen en klik op het eind. Terug over je ${name} bewegen haalt stukken weg.`
-            : `Tik op het eind voor een rechte ${name}, of sleep vanaf het beginpunt om hem precies te tekenen.`}
-      </p>
+      <ol className="route-steps">
+        <li className={tool.path.length > 0 ? 'done' : 'now'}>Tik op het beginpunt (A).</li>
+        <li className={tool.path.length > 1 ? 'done' : tool.path.length === 1 ? 'now' : ''}>
+          Tik op het eindpunt (B). Je {name} loopt in een rechte lijn van A naar B; met meer punten maak je bochten.
+        </li>
+        <li className={tool.path.length > 1 ? 'now' : ''}>Klopt de ligging? Tik op het groene vinkje ✓.</li>
+      </ol>
       <p className="muted small">
-        Elk stuk van tegel naar tegel kost <strong>1 actie</strong> (een station ook). Kies dus waar je je acties aan besteedt: wat je deze beurt
-        niet kwijt kunt, bouw je volgende beurt verder.
+        Elk stuk van tegel naar tegel kost <strong>1 actie</strong> (een station ook). Tik op je {name} om terug te gaan naar dat punt, of gebruik ↶
+        om het laatste punt weg te halen.
       </p>
       {plan?.plan?.fatal && <p className="error">{msgText(plan.plan.fatal)}</p>}
       {plan?.path && plan.plan && !plan.plan.fatal && (
@@ -95,11 +91,11 @@ export function RouteToolPanel() {
         <div className="checks">
           <label className="check">
             <input type="checkbox" checked={tool.stationStart} onChange={(e) => store.setTool({ ...tool, stationStart: e.target.checked })} />
-            {STATIONS[stationKind].icon} {STATIONS[stationKind].name} aan het begin (+1 actie)
+            {STATIONS[stationKind].icon} {STATIONS[stationKind].name} bij A (+1 actie)
           </label>
           <label className="check">
             <input type="checkbox" checked={tool.stationEnd} onChange={(e) => store.setTool({ ...tool, stationEnd: e.target.checked })} />
-            {STATIONS[stationKind].icon} {STATIONS[stationKind].name} aan het eind (+1 actie)
+            {STATIONS[stationKind].icon} {STATIONS[stationKind].name} bij B (+1 actie)
           </label>
           <span className="muted small">
             {money(STATIONS[stationKind].cost)} per station · bereik {STATIONS[stationKind].radius} tegel rondom: bouw het direct naast een industrie of
@@ -109,27 +105,48 @@ export function RouteToolPanel() {
       )}
       <p className="muted small desktop-only">
         {money(TRANSPORT[tool.transport].edgeCost)} per stuk op gras; bos, heuvels, bruggen en tunnels zijn duurder. Je eigen netwerk hergebruiken kost
-        geen actie.
+        geen actie. Met een muis zie je vooraf (gestippeld) waar het volgende stuk komt.
       </p>
       {tool.transport === 'canal' && (
         <p className="muted small">Schepen varen vrij over open water. Een kanaal verbindt water over land; bouw er havens (⚓) naast.</p>
       )}
-      <div className="button-row">
-        <button className="secondary" disabled={tool.path.length === 0} onClick={() => store.setTool({ ...tool, path: [] })}>
-          ↶ Opnieuw
-        </button>
-        <button className="secondary" onClick={() => store.setTool({ kind: 'inspect' })}>
-          Annuleren
-        </button>
-        <button
-          className="primary"
-          disabled={!plan?.plan || !!plan.plan.fatal || actions.length === 0 || free === 0}
-          onClick={() => end !== undefined && store.placeRoute(end)}
-        >
-          ✓ Plannen
-        </button>
-      </div>
     </section>
+  );
+}
+
+/** Floating bar on the map while laying a route: what it costs, take a point back, cancel, and the green ✓. */
+export function RouteBar() {
+  const store = useStore();
+  const tool = useUi((s) => s.tool);
+  useUi((s) => s.draft);
+  if (tool.kind !== 'route') return null;
+  const plan = store.routePlan();
+  const actions = plan ? store.routeActions(plan) : [];
+  const free = store.freeSlots().length;
+  const ok = !!plan?.plan && !plan.plan.fatal && actions.length > 0 && free > 0;
+  const text =
+    tool.path.length === 0
+      ? 'Tik op het beginpunt (A)'
+      : tool.path.length === 1
+        ? 'Tik op het eindpunt (B)'
+        : plan?.plan && !plan.plan.fatal
+          ? `${num(actions.length)} acties · ${money(plan.plan.cost)}${actions.length > free ? ` · ${free} vrij` : ''}`
+          : 'Deze route kan niet';
+  return (
+    <div className="route-bar" role="toolbar" aria-label="Route">
+      <span className="route-bar-text">
+        {TRANSPORT_ICON[tool.transport]} {text}
+      </span>
+      <button className="icon-btn" aria-label="Laatste punt terug" title="Laatste punt terug" disabled={tool.path.length === 0} onClick={() => store.undoRoutePoint()}>
+        ↶
+      </button>
+      <button className="icon-btn" aria-label="Annuleren" title="Annuleren" onClick={() => store.setTool({ kind: 'inspect' })}>
+        ✕
+      </button>
+      <button className="confirm-btn" aria-label="Route plannen" title="Route plannen" disabled={!ok} onClick={() => store.confirmRoute()}>
+        ✓
+      </button>
+    </div>
   );
 }
 

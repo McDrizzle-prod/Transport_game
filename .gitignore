@@ -6,3 +6,4 @@ data/
 e2e/screenshots/
 coverage/
 .vite/
+.tools/

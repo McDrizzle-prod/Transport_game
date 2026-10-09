@@ -13,6 +13,7 @@
     "dev": "node scripts/dev.mjs",
     "build": "npm run build -w client",
     "start": "npm run start -w server",
+    "online": "node scripts/online.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p shared && tsc -p server && tsc -p client",
     "check": "npm run typecheck && npm test",

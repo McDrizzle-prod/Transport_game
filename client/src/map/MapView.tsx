@@ -17,6 +17,8 @@ const SLOT_MS = 750;
 const BUILD_MS_MAX = 6000;
 const TICK_MS = 170;
 const TAP_SLOP = 8;
+/** Fingers move a little while tapping. */
+const TOUCH_SLOP = 12;
 
 export function MapView() {
   const store = useStore();
@@ -34,8 +36,6 @@ interface Gesture {
   cam: Camera;
   moved: boolean;
   pinch: { dist: number; midX: number; midY: number; world: [number, number] } | null;
-  /** Dragging from the end of a route being drawn extends it instead of moving the map. */
-  draw: boolean;
 }
 
 class MapController {
@@ -190,7 +190,7 @@ class MapController {
     this.pointers.set(e.pointerId, { x, y });
     this.anim = null;
     if (this.pointers.size === 1) {
-      this.gesture = { startX: x, startY: y, cam: { ...this.cam }, moved: false, pinch: null, draw: this.startsDrawing(x, y) };
+      this.gesture = { startX: x, startY: y, cam: { ...this.cam }, moved: false, pinch: null };
     } else if (this.pointers.size === 2) {
       const [a, b] = [...this.pointers.values()];
       const midX = (a.x + b.x) / 2;
@@ -201,21 +201,9 @@ class MapController {
         cam: { ...this.cam },
         moved: true,
         pinch: { dist: Math.hypot(a.x - b.x, a.y - b.y), midX, midY, world: this.renderer.toWorld(this.cam, midX, midY) },
-        draw: false,
       };
     }
   };
-
-  /** A press on (or right next to) the end of the route being drawn starts drawing. */
-  private startsDrawing(x: number, y: number): boolean {
-    const tool = this.store.getState().tool;
-    if (tool.kind !== 'route' || tool.path.length === 0) return false;
-    const map = this.store.getState().map!;
-    const [wx, wy] = this.renderer.toWorld(this.cam, x, y);
-    const end = tool.path[tool.path.length - 1];
-    const reach = Math.max(0.9, 22 / this.cam.zoom);
-    return Math.hypot(wx - ((end % map.width) + 0.5), wy - (Math.floor(end / map.width) + 0.5)) <= reach;
-  }
 
   private onPointerMove = (e: PointerEvent) => {
     const [x, y] = this.local(e);
@@ -240,12 +228,7 @@ class MapController {
       });
       return;
     }
-    if (!g.moved && Math.hypot(x - g.startX, y - g.startY) > TAP_SLOP) g.moved = true;
-    if (g.draw) {
-      const tile = this.tileAt(x, y);
-      if (g.moved && tile !== null) this.store.extendRoute(tile);
-      return;
-    }
+    if (!g.moved && Math.hypot(x - g.startX, y - g.startY) > (e.pointerType === 'mouse' ? TAP_SLOP : TOUCH_SLOP)) g.moved = true;
     if (g.moved && !g.pinch) {
       this.setCam({ zoom: g.cam.zoom, x: g.cam.x - (x - g.startX) / g.cam.zoom, y: g.cam.y - (y - g.startY) / g.cam.zoom });
     }
@@ -254,19 +237,12 @@ class MapController {
   private onPointerUp = (e: PointerEvent) => {
     const g = this.gesture;
     const wasTap = g && !g.moved && this.pointers.size === 1;
-    const drew = g && g.draw && g.moved && this.pointers.size === 1;
     this.pointers.delete(e.pointerId);
     if (this.pointers.size === 0) this.gesture = null;
     else if (this.pointers.size === 1 && g?.pinch) {
       // Continue panning with the remaining finger.
       const [p] = [...this.pointers.values()];
-      this.gesture = { startX: p.x, startY: p.y, cam: { ...this.cam }, moved: true, pinch: null, draw: false };
-    }
-    if (drew) {
-      // Letting go after drawing plans the route.
-      const tool = this.store.getState().tool;
-      if (tool.kind === 'route' && tool.path.length > 1) this.store.placeRoute(tool.path[tool.path.length - 1]);
-      return;
+      this.gesture = { startX: p.x, startY: p.y, cam: { ...this.cam }, moved: true, pinch: null };
     }
     if (wasTap) {
       const [x, y] = this.local(e);
@@ -303,8 +279,9 @@ class MapController {
       else if (s.tool.kind !== 'inspect' && s.tool.kind !== 'hq') this.store.setTool({ kind: 'inspect' });
       else this.store.select(null);
     } else if (e.key === 'Backspace' && s.tool.kind === 'route' && s.tool.path.length > 0) {
-      // Takes the last piece of the route back (or the start point).
-      this.store.setTool({ ...s.tool, path: s.tool.path.slice(0, -1) });
+      this.store.undoRoutePoint();
+    } else if (e.key === 'Enter' && s.tool.kind === 'route' && s.tool.path.length > 1) {
+      this.store.confirmRoute();
     } else if (e.key === '+' || e.key === '=') {
       this.flyTo({ ...this.cam, zoom: this.cam.zoom * 1.4 });
     } else if (e.key === '-') {
@@ -458,7 +435,8 @@ class MapController {
         return {
           kind: 'route',
           transport: tool.transport,
-          start: tool.path[0] ?? null,
+          points: tool.points.map((i) => tool.path[i]),
+          ghost: this.store.routeGhost(),
           path: plan?.path ?? null,
           blocked: (plan?.plan?.blocked ?? []).map((b) => b.tile),
           label: ok && plan?.plan ? `${actions} acties · ${money(plan.plan.cost)}${actions > free ? ` · ${free} vrij` : ''}` : null,

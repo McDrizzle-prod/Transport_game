@@ -1,5 +1,5 @@
 // Game operations used by the HTTP API and the turn scheduler.
-import { randomBytes, randomInt } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   REPORTS_KEPT,
@@ -49,12 +49,30 @@ export class ApiError extends Error {
 }
 
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+/** Wrong PINs allowed per player name before a pause, and how long that pause lasts. */
+const PIN_ATTEMPTS = 5;
+const PIN_LOCK_MS = 10 * 60_000;
+
+const validPin = (pin: unknown): pin is string => typeof pin === 'string' && /^\d{4,8}$/.test(pin);
+
+function hashPin(pin: string, salt = randomBytes(8).toString('hex')): string {
+  return `${salt}:${createHash('sha256').update(`${salt}:${pin}`).digest('hex')}`;
+}
+
+function pinMatches(pin: string, stored: string): boolean {
+  const [salt] = stored.split(':');
+  const a = Buffer.from(hashPin(pin, salt));
+  const b = Buffer.from(stored);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 export class GameService {
   /** Emits 'changed' with the game id whenever something visible changed. */
   readonly events = new EventEmitter();
   private readonly store: GameStore;
   private readonly now: () => number;
+  /** Wrong PIN attempts per game + player name. */
+  private readonly pinFailures = new Map<string, { count: number; until: number }>();
 
   constructor(store: GameStore, now: () => number = Date.now) {
     this.store = store;
@@ -72,20 +90,48 @@ export class GameService {
     const id = this.newGameId();
     const settings = normalizeSettings(body.settings, randomInt(1, 2 ** 31 - 1));
     const { state, map } = createGame(id, typeof body.name === 'string' ? body.name : '', settings, this.now());
-    const game: StoredGame = { version: 1, state, map, tokens: {}, orders: {}, reports: [] };
-    const joined = this.addPlayerTo(game, playerName, body.color, true);
+    const game: StoredGame = { version: 1, state, map, tokens: {}, pins: {}, orders: {}, reports: [] };
+    if (body.pin !== undefined && !validPin(body.pin)) throw new ApiError(400, 'pin_invalid');
+    const joined = this.addPlayerTo(game, playerName, body.color, true, body.pin);
     this.store.add(game);
     this.changed(id);
     console.log(`[game ${id}] created by ${playerName} (map ${settings.mapSize}, seed ${settings.seed})`);
     return joined;
   }
 
+  /** Join as a new company, or continue as an existing one with its name + PIN (another device, a new link). */
   join(id: string, body: JoinRequest): JoinResponse {
     const game = this.game(id);
-    const name = typeof body?.name === 'string' ? body.name : '';
-    const joined = this.addPlayerTo(game, name, body?.color, false);
+    const name = typeof body?.name === 'string' ? body.name.trim() : '';
+    const pin = body?.pin;
+    if (pin !== undefined && !validPin(pin)) throw new ApiError(400, 'pin_invalid');
+    const existing = game.state.players.find((p) => p.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      const stored = game.pins?.[existing.id];
+      if (!stored) throw new ApiError(409, 'name_taken');
+      const key = `${game.state.id}:${existing.id}`;
+      const failures = this.pinFailures.get(key);
+      if (failures && failures.count >= PIN_ATTEMPTS && this.now() < failures.until) throw new ApiError(429, 'too_many_attempts');
+      if (!pin || !pinMatches(pin, stored)) {
+        const count = failures && this.now() < failures.until ? failures.count + 1 : 1;
+        this.pinFailures.set(key, { count, until: this.now() + PIN_LOCK_MS });
+        throw new ApiError(403, pin ? 'pin_wrong' : 'name_taken_pin');
+      }
+      this.pinFailures.delete(key);
+      return { gameId: game.state.id, playerId: existing.id, token: game.tokens[existing.id], rejoined: true };
+    }
+    const joined = this.addPlayerTo(game, name, body?.color, false, pin);
     this.changed(game.state.id);
     return joined;
+  }
+
+  /** Set or change the player's PIN. */
+  setPin(id: string, token: string | null, body: { pin?: unknown }): void {
+    const game = this.game(id);
+    const playerId = this.requirePlayer(game, token);
+    if (!validPin(body?.pin)) throw new ApiError(400, 'pin_invalid');
+    (game.pins ??= {})[playerId] = hashPin(body.pin);
+    this.changed(game.state.id);
   }
 
   summary(id: string): GameSummary {
@@ -111,7 +157,7 @@ export class GameService {
     const player = playerId ? game.state.players.find((p) => p.id === playerId) : undefined;
     return {
       game: game.state,
-      you: player ? { playerId: player.id, isHost: player.isHost } : null,
+      you: player ? { playerId: player.id, isHost: player.isHost, hasPin: !!game.pins?.[player.id] } : null,
       orders: player ? (game.orders[player.id] ?? { slots: emptySlots(game.state.settings.actionSlots), ready: false, updatedAt: 0 }) : null,
       ready: Object.fromEntries(game.state.players.map((p) => [p.id, game.orders[p.id]?.ready ?? false])),
       lastReportTurn: game.reports.length ? game.reports[game.reports.length - 1].turn : null,
@@ -255,10 +301,11 @@ export class GameService {
     this.changed(id);
   }
 
-  private addPlayerTo(game: StoredGame, name: string, color: string | undefined, isHost: boolean): JoinResponse {
+  private addPlayerTo(game: StoredGame, name: string, color: string | undefined, isHost: boolean, pin?: string): JoinResponse {
     const playerId = `p_${randomBytes(6).toString('hex')}`;
     const result = addPlayer(game.state, { id: playerId, name, color, isHost, now: this.now() });
     if ('code' in result) throw new ApiError(400, result.code);
+    if (pin) (game.pins ??= {})[playerId] = hashPin(pin);
     const token = randomBytes(24).toString('base64url');
     game.tokens[playerId] = token;
     return { gameId: game.state.id, playerId, token };

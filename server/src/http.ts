@@ -11,6 +11,32 @@ interface Ctx {
   body: unknown;
   token: string | null;
   url: URL;
+  /** Client address (behind a Cloudflare tunnel: the visitor's address). */
+  ip: string;
+}
+
+export interface HttpOptions {
+  /** Address under which friends reach the server (e.g. a tunnel); used in invite links. */
+  publicUrl?: string | null;
+  /** Games one address may create per hour (keeps a server that is reachable from the internet usable). */
+  gamesPerHour?: number;
+  now?: () => number;
+}
+
+/** Counts events per key in a sliding hour. */
+function hourlyLimit(max: number, now: () => number) {
+  const hits = new Map<string, number[]>();
+  return (key: string): boolean => {
+    const t = now();
+    const recent = (hits.get(key) ?? []).filter((at) => t - at < 3_600_000);
+    if (recent.length >= max) {
+      hits.set(key, recent);
+      return false;
+    }
+    recent.push(t);
+    hits.set(key, recent);
+    return true;
+  };
 }
 
 type Handler = (ctx: Ctx) => unknown;
@@ -113,11 +139,16 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL, dist: 
   return true;
 }
 
-export function createHttpHandler(service: GameService, clientDist: string | null) {
+export function createHttpHandler(service: GameService, clientDist: string | null, options: HttpOptions = {}) {
   const num = (s: string) => Number.parseInt(s, 10);
+  const mayCreate = hourlyLimit(options.gamesPerHour ?? 20, options.now ?? Date.now);
   const routes: Route[] = [
     route('GET', '/api/health', () => ({ ok: true })),
-    route('POST', '/api/games', ({ body }) => service.createGame(body as never)),
+    route('GET', '/api/info', () => ({ publicUrl: options.publicUrl ?? null })),
+    route('POST', '/api/games', ({ body, ip }) => {
+      if (!mayCreate(ip)) throw new ApiError(429, 'too_many_games');
+      return service.createGame(body as never);
+    }),
     route('GET', '/api/games/:id', ({ params }) => service.summary(params.id)),
     route('POST', '/api/games/:id/join', ({ params, body }) => service.join(params.id, body as never)),
     route('GET', '/api/games/:id/map', ({ params }) => service.map(params.id), 'public, max-age=86400, immutable'),
@@ -130,6 +161,7 @@ export function createHttpHandler(service: GameService, clientDist: string | nul
     route('POST', '/api/games/:id/alliance', ({ params, token, body }) => service.alliance(params.id, token, body as never)),
     route('POST', '/api/games/:id/loan', ({ params, token, body }) => service.loan(params.id, token, body as never)),
     route('POST', '/api/games/:id/bid', ({ params, token, body }) => service.bid(params.id, token, body as never)),
+    route('POST', '/api/games/:id/pin', ({ params, token, body }) => service.setPin(params.id, token, body as never)),
   ];
 
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -155,7 +187,8 @@ export function createHttpHandler(service: GameService, clientDist: string | nul
           const auth = String(req.headers.authorization ?? '');
           const token = auth.startsWith('Bearer ') ? auth.slice(7) : url.searchParams.get('token');
           const body = req.method === 'GET' ? undefined : await readBody(req);
-          const result = await r.handler({ params, body, token, url });
+          const ip = String(req.headers['cf-connecting-ip'] ?? '') || req.socket.remoteAddress || '?';
+          const result = await r.handler({ params, body, token, url, ip });
           sendJson(req, res, 200, result ?? { ok: true }, r.cache);
           return;
         }

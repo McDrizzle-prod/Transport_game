@@ -12,7 +12,7 @@ wint het laagste slot; kozen ze hetzelfde slot, dan delen ze de tegel.
 
 Dit is een **proof of concept**: speelbaar in de browser en installeerbaar als app op telefoon/tablet (PWA).
 
-| Plannen: een route komt meteen in je vrije slots (hier 2–9) | Uitvoering per slot: ○ gedeelde tegel, ✖ verloren tegel |
+| Plannen: een geplande route in de slots (hier 2–9) | Uitvoering per slot: ○ gedeelde tegel, ✖ verloren tegel |
 | --- | --- |
 | ![Plannen](docs/img/plannen.jpg) | ![Uitvoering](docs/img/uitvoering-conflict.jpg) |
 
@@ -20,9 +20,13 @@ Dit is een **proof of concept**: speelbaar in de browser en installeerbaar als a
 | --- | --- |
 | ![Stad](docs/img/stad.jpg) | ![Beurs](docs/img/beurs.jpg) |
 
-| Jouw aandelen: groene gloed, 🔨 = veiling | Op de telefoon: tik, tik = rechte lijn |
+| Jouw aandelen: groene gloed, 🔨 = veiling | Op de telefoon: tik A, tik B, groen vinkje |
 | --- | --- |
 | ![Aandelen](docs/img/aandelen.jpg) | ![Mobiel](docs/img/mobiel.jpg) |
+
+| Een vriend opent de link: meteen meedoen | Verder spelen op een ander apparaat: naam + pincode |
+| --- | --- |
+| ![Meedoen](docs/img/meedoen.jpg) | ![Verder spelen](docs/img/verder-spelen.jpg) |
 
 ## Snel starten
 
@@ -49,8 +53,49 @@ en de Vite-ontwikkelserver voor de client.
 
 ### Met anderen spelen
 
-De host deelt de spelcode (of de uitnodigingslink uit het tabblad Spelers). Iedereen die de server kan bereiken
-kan meedoen; zie [Hosten](#hosten) om de server online te zetten.
+De host deelt de uitnodigingslink (tabblad Spelers, knop **Kopieer** of **Delen**) of de spelcode. Wie de link
+opent, komt direct op de meedoen-pagina: bedrijfsnaam, een **pincode** en een kleur kiezen, klaar.
+
+- **Op hetzelfde wifi-netwerk** werkt het adres van je computer (zie *Op je telefoon* hieronder).
+- **Vrienden elders** (andere wifi, mobiel internet): start het spel met `npm run online`, zie
+  [Online spelen met vrienden](#online-spelen-met-vrienden-buiten-je-wifi).
+- **Verder spelen op een ander apparaat** (of als de link van de host veranderd is): open de link of vul de
+  spelcode in, tik op je eigen naam en vul je pincode in. Je speelt dan verder met hetzelfde bedrijf.
+
+## Online spelen met vrienden (buiten je wifi)
+
+Met één commando zet je het spel online via een gratis tunnel van Cloudflare. Je hebt geen account nodig; je
+computer is de server, dus die moet aan blijven staan zolang jullie spelen. Voor een groep van zo'n 6 spelers is
+dat ruim voldoende.
+
+1. Stop het spel als het nog draait (Ctrl+C in het zwarte venster).
+2. Open opnieuw een opdrachtvenster (cmd) in de map van het spel en typ:
+   ```bash
+   npm run online
+   ```
+   De eerste keer wordt het programma *cloudflared* (± 40 MB) automatisch gedownload, van de officiële
+   Cloudflare-pagina op GitHub.
+3. Na een halve minuut zie je een kader met **"Het spel staat online!"** en een link als
+   `https://iets-met-woorden.trycloudflare.com`. Dat is de link voor je vrienden.
+4. Speel zelf op je eigen computer via <http://localhost:8787>. Maak een spel (of ga verder met een spel) en deel
+   de uitnodigingslink uit het tabblad **Spelers**: die gebruikt automatisch het online adres.
+5. Je vrienden openen de link op hun telefoon of computer, kiezen een bedrijfsnaam en pincode en doen mee.
+6. Laat het venster open. Stoppen: Ctrl+C.
+
+Goed om te weten:
+
+- **Elke keer dat je `npm run online` start, krijg je een nieuwe link.** De spellen blijven bewaard op je
+  computer. Stuur je vrienden de nieuwe link; zij tikken op hun naam en vullen hun pincode in om verder te spelen.
+- **Je computer moet aan staan** (en niet in slaapstand) zolang er gespeeld wordt. Een beurt die gepland stond
+  terwijl je computer uit stond, wordt uitgevoerd zodra het spel weer draait. Voor playtests werkt "elke N minuten"
+  of "alleen als de host op uitvoeren drukt" het prettigst.
+- Iedereen met de link kan het spel openen; deel hem dus alleen met wie mee mag spelen. Om misbruik te beperken
+  kan één adres hooguit 20 spellen per uur maken, en na 5 verkeerde pincodes moet je 10 minuten wachten.
+- **Werkt het niet?** Zie je "poort 8787 is al in gebruik", stop dan eerst `npm run dev` of `npm start`. Komt er na
+  een minuut geen link, controleer dan je internetverbinding (op werk- of schoolnetwerken kan de tunnel geblokkeerd
+  zijn). Laat Windows eventueel *cloudflared* toe als de firewall erom vraagt.
+- Wil je een vaste link die altijd werkt, ook als jouw computer uit staat? Dan moet het spel op een server in de
+  cloud draaien; zie [Hosten](#hosten) en de roadmap.
 
 ## Wat zit er in deze versie
 
@@ -102,9 +147,14 @@ in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 De volledige spelregels: [docs/SPELREGELS.md](docs/SPELREGELS.md).
 
-## Als app op je telefoon
+## Op je telefoon
 
-De client is een Progressive Web App:
+**Op hetzelfde wifi-netwerk:** start het spel op je computer (`npm run dev`) en kijk in het venster naar de regel
+`Network: http://192.168.x.x:5173`. Open dat adres in de browser van je telefoon. Laadt het niet, laat Windows dan
+*Node.js* toe op privénetwerken (Windows-beveiliging → Firewall → Een app toestaan). **Buiten je wifi:** gebruik
+`npm run online` (zie hierboven).
+
+Als app op je beginscherm (Progressive Web App):
 
 - **Android (Chrome)**: menu ⋮ → *App installeren* / *Toevoegen aan startscherm*.
 - **iPhone/iPad (Safari)**: deelknop → *Zet op beginscherm*.
@@ -129,6 +179,7 @@ Instellingen via omgevingsvariabelen:
 | `HOST` | `0.0.0.0` | Netwerkinterface |
 | `DATA_DIR` | `server/data` | Map waarin elk spel als JSON-bestand wordt bewaard |
 | `CLIENT_DIST` | `client/dist` | Gebouwde client die de server meelevert |
+| `PUBLIC_URL` | – | Adres waarop vrienden de server bereiken; komt in de uitnodigingslinks (`npm run online` zet dit zelf) |
 
 Elke Node-host werkt (VPS, Render, Fly.io, Railway, ...), zolang WebSockets doorgelaten worden op `/ws` en
 `DATA_DIR` op een blijvende schijf staat. De server voert beurten zelf uit op het ingestelde tijdstip; staat hij
@@ -152,6 +203,7 @@ shared/   Spelregels in TypeScript, zonder afhankelijkheden (draait in server é
   config.ts        alle getallen voor de spelbalans (kosten, snelheden, prijzen, ...)
 server/   Node-server: REST-API, WebSocket-push, beurtplanner, opslag als JSON
 client/   React + Canvas: kaartweergave, gereedschap, actieslots, rapporten; PWA
+scripts/  dev.mjs (ontwikkelen) en online.mjs (online spelen via een Cloudflare-tunnel)
 e2e/      End-to-end test die een spel via de echte UI speelt en screenshots maakt
 ```
 

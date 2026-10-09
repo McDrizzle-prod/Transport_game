@@ -412,6 +412,11 @@ export class MapRenderer {
     switch (tool.kind) {
       case 'route': {
         const color = KIND_COLOR[tool.transport];
+        if (tool.ghost) {
+          // What the next click would add: dashed and lighter.
+          pathLine(tool.ghost, 'rgba(255, 255, 255, 0.55)', Math.max(0.32, 3.5 / zoom), [0.25, 0.18]);
+          pathLine(tool.ghost, hexToRgba(color, 0.55), Math.max(0.18, 2 / zoom), [0.25, 0.18]);
+        }
         if (tool.path) {
           pathLine(tool.path, 'rgba(255, 255, 255, 0.9)', Math.max(0.42, 4.5 / zoom));
           pathLine(tool.path, hexToRgba(color, tool.ok ? 1 : 0.7), Math.max(0.28, 3 / zoom), tool.ok ? [] : [0.3, 0.2]);
@@ -759,16 +764,24 @@ export class MapRenderer {
     const ctx = this.ctx;
     const pos = (t: number) => this.toScreen(cam, (t % scene.map.width) + 0.5, ((t / scene.map.width) | 0) + 0.5);
     if (tool.kind === 'route') {
-      if (tool.start !== null) {
-        const [x, y] = pos(tool.start);
+      // The tapped points: the start white, the others yellow; the route runs straight between them.
+      tool.points.forEach((t, i) => {
+        const [x, y] = pos(t);
         ctx.beginPath();
-        ctx.arc(x, y, 8, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
+        ctx.arc(x, y, i === 0 ? 9 : 8, 0, Math.PI * 2);
+        ctx.fillStyle = i === 0 ? '#ffffff' : '#ffd54a';
         ctx.fill();
         ctx.lineWidth = 2.5;
         ctx.strokeStyle = '#222';
         ctx.stroke();
-      }
+        if (i === 0 || i === tool.points.length - 1) {
+          ctx.fillStyle = '#222';
+          ctx.font = `800 10px ${UI_FONT}`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(i === 0 ? 'A' : 'B', x, y + 0.5);
+        }
+      });
       const end = tool.path?.[tool.path.length - 1];
       if (tool.label && end !== undefined) {
         const [x, y] = pos(end);

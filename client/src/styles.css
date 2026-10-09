@@ -375,7 +375,7 @@ details[open] summary {
 
 @media (min-width: 900px) {
   .home-grid {
-    grid-template-columns: 1fr 1.15fr 0.9fr;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     align-items: start;
   }
 }
@@ -1622,4 +1622,152 @@ ul.plain {
 
 .ok-text {
   color: var(--ok);
+}
+
+/* --- Route tool: steps in the panel and the floating bar with the green check ------------------------- */
+
+.route-steps {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.route-steps li.now {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.route-steps li.done {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.route-bar {
+  position: absolute;
+  z-index: 30;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--sheet-h, 0px) + 66px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 16px);
+  padding: 6px 6px 6px 14px;
+  background: rgba(21, 32, 41, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.route-bar-text {
+  font-weight: 650;
+  font-size: 0.92rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.route-bar .icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.confirm-btn {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: #2e9d4a;
+  color: #fff;
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.confirm-btn:disabled {
+  background: var(--panel-3);
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+.game.routing .toast {
+  bottom: calc(var(--sheet-h, 0px) + 136px);
+}
+
+@media (min-width: 900px) {
+  .route-bar {
+    bottom: 22px;
+    left: calc(50% - 200px);
+  }
+  .game.routing .toast {
+    bottom: 96px;
+    left: calc(50% - 200px);
+  }
+}
+
+/* Phones zoom the page into text fields with small text; 16px prevents that. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* --- Joining ---------------------------------------------------------------- */
+
+button.chip {
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+  border: 1px solid transparent;
+}
+
+button.chip:hover {
+  border-color: var(--accent);
+}
+
+.join-code {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.home-single {
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.gate-links {
+  text-align: center;
+  margin-top: 14px;
+}
+
+.pin-box {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+
+.pin-box.missing {
+  border-color: rgba(255, 167, 38, 0.6);
+}
+
+.pin-box h4 {
+  margin-bottom: 4px;
+}
+
+.online-banner {
+  max-width: 1100px;
+  margin: 0 auto 16px;
+  padding: 10px 14px;
+  border: 1px solid rgba(87, 187, 91, 0.5);
+  border-radius: 12px;
+  background: rgba(87, 187, 91, 0.1);
+  overflow-wrap: anywhere;
 }

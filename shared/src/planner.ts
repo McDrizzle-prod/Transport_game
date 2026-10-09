@@ -1,11 +1,11 @@
-// Route planning for the build tools. The route tool follows the player's pointer (extendRoutePath);
-// gaps are filled with a straight line, or with the cheapest buildable path around an obstacle
-// (planRoute). That search runs on pointer moves, so it uses flat typed arrays and lookup tables that
+// Route planning for the build tools. The route tool connects the points the player taps (addRoutePoint)
+// with straight lines; only around an obstacle it uses the cheapest buildable path (planRoute). That
+// search also runs for the preview on pointer moves, so it uses flat typed arrays and lookup tables that
 // are computed once per (world, player, transport kind).
 import { MAX_ROUTE_EDGES, TERRAIN, TRANSPORT } from './config';
 import { checkRouteTile, crossingOwners, edgeNeeded, planBuild, stepAllowed } from './construction';
 import type { ConstructionPlan } from './construction';
-import { DIRS, MinHeap, SQRT2, chebyshev, crossingPair, edgeKey, isAdjacent, tileX, tileY, toIndex } from './geometry';
+import { DIRS, MinHeap, SQRT2, chebyshev, crossingPair, edgeKey, tileX, tileY, toIndex } from './geometry';
 import type { Grid } from './geometry';
 import { Terrain, TileUse } from './types';
 import type { PlayerId, TransportKind } from './types';
@@ -236,53 +236,30 @@ function canStep(world: World, player: PlayerId, kind: TransportKind, a: number,
   return !(edgeNeeded(world, kind, a, b) && crossingOwners(world, a, b));
 }
 
-/** Tiles where a bend is kept: junctions with the existing network, stations and streets keep the route connected. */
-function keepCorner(world: World, player: PlayerId, kind: TransportKind, tile: number): boolean {
-  if (world.stationAt.has(tile)) return true;
-  if (kind === 'road' && world.map.use[tile] === TileUse.CityStreet) return true;
-  return world.edgesAt(tile).some((e) => e.kind === kind && world.canUse(e.owners, player));
-}
+export type RoutePointError = 'blocked' | 'unreachable' | 'crossing' | 'too_long';
+
+export type RoutePointResult = { ok: true; path: number[]; detour: boolean } | { ok: false; error: RoutePointError };
 
 /**
- * The route tool follows the pointer: extends `path` to `tile`, the way the player drew it.
- * - Moving back onto the route takes it back to that tile.
- * - A gap (a fast pointer, or a tap on touch screens) is filled with a straight line, or with the
- *   cheapest way around an obstacle.
- * - An L-shaped bend becomes one diagonal segment: one action less.
- * Returns `path` itself when the tile can't be reached.
+ * The route tool: adds a point the player tapped to the route. From the current end the route runs in a
+ * straight line to the point (as few segments as possible); only when something is in the way it goes
+ * around it (`detour`). A route may not cross itself.
  */
-export function extendRoutePath(world: World, player: PlayerId, kind: TransportKind, path: number[], tile: number): number[] {
-  if (path.length === 0) return checkRouteTile(world, player, kind, tile).ok ? [tile] : path;
-  const back = path.indexOf(tile);
-  if (back >= 0) return back === path.length - 1 ? path : path.slice(0, back + 1);
+export function addRoutePoint(world: World, player: PlayerId, kind: TransportKind, path: number[], tile: number): RoutePointResult {
+  if (!checkRouteTile(world, player, kind, tile).ok) return { ok: false, error: 'blocked' };
+  if (path.length === 0) return { ok: true, path: [tile], detour: false };
   const last = path[path.length - 1];
-  let steps: number[] | null = straightLine(world.grid, last, tile).slice(1);
-  let prev = last;
-  for (const t of steps) {
-    if (!canStep(world, player, kind, prev, t)) {
-      steps = null;
-      break;
-    }
-    prev = t;
-  }
-  if (!steps) {
+  let leg = straightLine(world.grid, last, tile);
+  let detour = false;
+  if (leg.some((t, i) => i > 0 && !canStep(world, player, kind, leg[i - 1], t))) {
     const around = planRoute(world, player, kind, [last, tile]);
-    if (!around.path || around.error) return path;
-    steps = around.path.slice(1);
+    if (!around.path || around.error) return { ok: false, error: around.error === 'too_long' ? 'too_long' : 'unreachable' };
+    leg = around.path;
+    detour = true;
   }
-  let result = path.slice();
-  for (const t of steps) {
-    const k = result.indexOf(t);
-    if (k >= 0) {
-      result = result.slice(0, k + 1);
-      continue;
-    }
-    result.push(t);
-    const n = result.length;
-    if (n >= 3) {
-      const [a, corner, b] = [result[n - 3], result[n - 2], result[n - 1]];
-      if (isAdjacent(world.grid, a, b) && !keepCorner(world, player, kind, corner) && canStep(world, player, kind, a, b)) result.splice(n - 2, 1);
-    }
-  }
-  return result.length - 1 > MAX_ROUTE_EDGES ? path : result;
+  const taken = new Set(path);
+  if (leg.slice(1).some((t) => taken.has(t))) return { ok: false, error: 'crossing' };
+  const next = [...path, ...leg.slice(1)];
+  if (next.length - 1 > MAX_ROUTE_EDGES) return { ok: false, error: 'too_long' };
+  return { ok: true, path: next, detour };
 }

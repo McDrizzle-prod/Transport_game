@@ -10,6 +10,8 @@ export interface StoredGame {
   map: MapData;
   /** Secret token per player. */
   tokens: Record<PlayerId, string>;
+  /** Hashed PIN per player ("salt:hash"), to continue on another device. Missing in games of older versions. */
+  pins?: Record<PlayerId, string>;
   /** Orders for the current turn (secret until executed). */
   orders: Record<PlayerId, PlayerOrders>;
   /** Most recent turn reports, oldest first. */

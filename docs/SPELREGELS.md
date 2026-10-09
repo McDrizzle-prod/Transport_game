@@ -13,6 +13,8 @@ schulden en aandelen van bedrijven, staat op de [roadmap](ROADMAP.md).)
 - De host maakt een spel: kaartgrootte (48, 64 of 96 tegels in het vierkant), maximaal aantal spelers, het aantal
   **acties per beurt** (standaard 5, van 3 tot 20), startkapitaal (standaard **€ 1.500.000**) en het moment van
   uitvoeren.
+- Spelers doen mee via de uitnodigingslink of de spelcode, met een bedrijfsnaam en een **pincode** (4 tot 8
+  cijfers). Met naam en pincode speel je verder op een ander apparaat of via een nieuwe link van de host.
 - Iedere speler plaatst een **hoofdkantoor** op een vrije tegel, minstens **6 tegels** (in beide richtingen) van
   andere hoofdkantoren. Daarna start de host het spel. Wie later instapt, plaatst zijn hoofdkantoor bij binnenkomst.
 
@@ -43,18 +45,20 @@ voertuig-acties. De volgorde is dus belangrijk:
 | **Voertuigen verkopen** | 1 actie | Verkoop voertuigen van een lijn voor 50% van de nieuwprijs (via de info van een station). |
 | **Lenen / aflossen / bieden** | geen actie | Gaat direct in, via het tabblad Beurs. |
 
-**Zo plan je een route:** kies Weg, Spoor of Kanaal en klik op de tegel waar de route begint.
+**Zo plan je een route:** kies Weg, Spoor of Kanaal en tik op punt A (het begin) en daarna op punt B.
 
-- **Met een muis** beweeg je daarna over de tegels waar de route moet komen: de weg volgt je muis. Een bocht in een
-  L-vorm wordt één schuin stuk (één actie minder). Beweeg je terug over de route, dan haal je de stukken weer weg.
-  Klik op het eind om de route te plannen.
-- **Op een telefoon of tablet** tik je op het eind: de route loopt dan in een rechte lijn (om obstakels heen). Of
-  sleep vanaf het beginpunt om de route precies te tekenen; loslaten plant hem.
+- De route loopt in een **rechte lijn** van A naar B (schuine stukken tellen als één stuk), alleen om een
+  obstakel heen als er iets in de weg ligt; dan meldt het spel dat.
+- Je ziet eerst een **voorbeeld**: de route, de punten A en B, het aantal acties en de kosten. Met een muis zie je
+  bovendien gestippeld waar het volgende stuk komt.
+- Wil je een bocht? Tik op meer punten: de route loopt recht van punt naar punt. Tik op de route zelf om terug te
+  gaan naar dat punt, of op ↶ om het laatste punt weg te halen.
+- Klopt de ligging? Tik op het **groene vinkje ✓**. Pas dan komen de stukken in je vrije actieslots (vink vooraf aan
+  of je bij A en/of B een station wilt; elk station is een extra actie).
 
-Elk stuk dat gebouwd moet worden, komt direct in je vrije actieslots (vink vooraf aan of je aan het begin en/of eind
-een station wilt; elk station is een extra actie). Daarna ben je terug in de gewone kaartweergave. Past de route niet
-helemaal, dan worden de eerste stukken gepland; de rest bouw je volgende beurt verder vanaf het eind. In de lijst met
-acties staat een route als één regel (bijv. "slot 2–9"), die je kunt openklappen of in één keer kunt verwijderen.
+Past de route niet helemaal, dan worden de eerste stukken gepland; de rest bouw je volgende beurt verder vanaf het
+eind. In de lijst met acties staat een route als één regel (bijv. "slot 2–9"), die je kunt openklappen of in één
+keer kunt verwijderen.
 
 ## Conflicten
 

@@ -5,18 +5,24 @@ export interface CreateGameRequest {
   name: string;
   playerName: string;
   color?: string;
+  /** 4-8 digits: lets the player continue on another device (or via a new link) by name + PIN. */
+  pin?: string;
   settings?: Partial<GameSettings>;
 }
 
 export interface JoinRequest {
   name: string;
   color?: string;
+  /** For a new player: their PIN. For an existing name: the PIN that proves it is them (continue playing). */
+  pin?: string;
 }
 
 export interface JoinResponse {
   gameId: string;
   playerId: PlayerId;
   token: string;
+  /** true when an existing player continued (name + PIN) instead of joining as a new company. */
+  rejoined?: boolean;
 }
 
 export interface GameSummary {
@@ -32,7 +38,7 @@ export interface GameSummary {
 /** Everything a client needs to show a game. Orders of other players stay secret. */
 export interface ClientView {
   game: GameState;
-  you: { playerId: PlayerId; isHost: boolean } | null;
+  you: { playerId: PlayerId; isHost: boolean; hasPin: boolean } | null;
   orders: PlayerOrders | null;
   /** Which players marked their orders as ready. */
   ready: Record<PlayerId, boolean>;

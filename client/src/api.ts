@@ -51,6 +51,7 @@ async function call<T>(method: string, path: string, body?: unknown, token?: str
 export const api = {
   createGame: (req: CreateGameRequest) => call<JoinResponse>('POST', '/api/games', req),
   summary: (id: string) => call<GameSummary>('GET', `/api/games/${id}`),
+  info: () => call<{ publicUrl: string | null }>('GET', '/api/info'),
   join: (id: string, req: JoinRequest) => call<JoinResponse>('POST', `/api/games/${id}/join`, req),
   map: (id: string) => call<MapData>('GET', `/api/games/${id}/map`),
   view: (id: string, token: string | null) => call<ClientView>('GET', `/api/games/${id}/view`, undefined, token),
@@ -64,6 +65,7 @@ export const api = {
     call('POST', `/api/games/${id}/alliance`, { action, player }, token),
   loan: (id: string, token: string, action: 'take' | 'repay', amount: number) => call('POST', `/api/games/${id}/loan`, { action, amount }, token),
   bid: (id: string, token: string, auction: number, amount: number) => call('POST', `/api/games/${id}/bid`, { auction, amount }, token),
+  setPin: (id: string, token: string, pin: string) => call('POST', `/api/games/${id}/pin`, { pin }, token),
 };
 
 function wsUrl(gameId: string, token: string | null): string {

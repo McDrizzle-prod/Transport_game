@@ -38,8 +38,8 @@ export function HelpTab() {
       <h4>Bouwen</h4>
       <ul>
         <li>
-          Kies Weg, Spoor of Kanaal en klik op het begin. Beweeg dan de muis over de tegels waar de route moet komen en klik op het eind (terug
-          bewegen haalt stukken weg). Op een telefoon: tik op het eind voor een rechte lijn, of sleep vanaf het beginpunt. De route komt meteen in je
+          Kies Weg, Spoor of Kanaal, tik op punt A en daarna op punt B: je ziet hoe de route in een rechte lijn gaat lopen (alleen om obstakels
+          heen). Tik op meer punten voor bochten, op ↶ om een punt terug te nemen. Klopt het? Tik op het groene vinkje ✓; dan komt de route in je
           vrije slots.
         </li>
         <li>

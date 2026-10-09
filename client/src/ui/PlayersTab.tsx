@@ -5,7 +5,7 @@ import { ApiError, api } from '../api';
 import { money, signedMoney } from '../format';
 import { errorText } from '../i18n';
 import { identitiesFor, saveIdentity, setActivePlayer } from '../identity';
-import { inviteLink } from '../nav';
+import { inviteLink, usePublicUrl } from '../nav';
 import { useStore, useUi } from '../state/store';
 
 export function PlayersTab() {
@@ -87,16 +87,70 @@ export function PlayersTab() {
         Bondgenoten mogen elkaars wegen, sporen, kanalen en stations gebruiken en erop aansluiten. Verlaat iemand de alliantie, dan rijden diens
         voertuigen niet meer over jouw netwerk.
       </p>
+      <PinBox />
       <Invite />
       <TestPlayers />
     </section>
   );
 }
 
+/** Set or change the PIN that lets the player continue on another device (company name + PIN). */
+function PinBox() {
+  const store = useStore();
+  const you = useUi((s) => s.view?.you);
+  const [pin, setPin] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!you) return null;
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    if (await store.setPin(pin)) setPin('');
+    setBusy(false);
+  };
+  return (
+    <div className={`pin-box ${you.hasPin ? '' : 'missing'}`}>
+      <h4>🔑 Verder spelen op een ander apparaat</h4>
+      <p className="small">
+        {you.hasPin
+          ? 'Je pincode is ingesteld. Op een ander apparaat (of via een nieuwe link van de host) doe je mee met de spelcode, je bedrijfsnaam en je pincode.'
+          : 'Je hebt nog geen pincode. Stel er een in: dan kun je op een ander apparaat, of via een nieuwe link van de host, verder spelen met je bedrijfsnaam en pincode.'}
+      </p>
+      <form className="copy-row" onSubmit={submit}>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder={you.hasPin ? 'Nieuwe pincode' : 'Pincode (4 tot 8 cijfers)'}
+          aria-label="Pincode"
+          value={pin}
+          onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+        />
+        <button className="secondary" disabled={busy || pin.length < 4}>
+          {you.hasPin ? 'Wijzigen' : 'Instellen'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export function Invite() {
   const store = useStore();
   const id = useUi((s) => s.gameId);
-  const link = inviteLink(id);
+  const publicUrl = usePublicUrl();
+  const link = inviteLink(id, publicUrl);
+  const local = !publicUrl && /^(localhost|127\.|\[::1\])/.test(window.location.hostname);
+  const copy = () => {
+    const done = () => store.toast('Link gekopieerd', 'ok');
+    const fallback = () => {
+      // Without https the clipboard API is missing: select the text and use the old copy command.
+      const input = document.querySelector<HTMLInputElement>('.invite input');
+      input?.select();
+      if (document.execCommand?.('copy')) done();
+      else store.toast('Kopiëren lukte niet; selecteer de link en kopieer hem zelf', 'error');
+    };
+    if (navigator.clipboard) navigator.clipboard.writeText(link).then(done, fallback);
+    else fallback();
+  };
   return (
     <div className="invite">
       <h4>Uitnodigen</h4>
@@ -105,18 +159,25 @@ export function Invite() {
       </p>
       <div className="copy-row">
         <input readOnly value={link} onFocus={(e) => e.target.select()} aria-label="Uitnodigingslink" />
-        <button
-          className="secondary"
-          onClick={() => {
-            void navigator.clipboard?.writeText(link).then(
-              () => store.toast('Link gekopieerd', 'ok'),
-              () => store.toast('Kopiëren lukte niet; selecteer de link handmatig', 'error'),
-            );
-          }}
-        >
+        <button className="secondary" onClick={copy}>
           Kopieer
         </button>
+        {'share' in navigator && (
+          <button
+            className="secondary"
+            onClick={() => void navigator.share({ title: 'Doe mee met mijn transportspel', text: `Spelcode ${id}`, url: link }).catch(() => undefined)}
+          >
+            Delen
+          </button>
+        )}
       </div>
+      {publicUrl && <p className="small ok-text">🌍 Deze link werkt ook voor vrienden buiten je wifi.</p>}
+      {local && (
+        <p className="small warn">
+          Dit adres werkt alleen op deze computer. Wil je met vrienden spelen? Start het spel met <code>npm run online</code> (zie de handleiding),
+          dan staat hier een link die overal werkt.
+        </p>
+      )}
     </div>
   );
 }

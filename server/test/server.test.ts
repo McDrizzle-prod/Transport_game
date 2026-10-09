@@ -199,6 +199,34 @@ describe('API', () => {
     expect((await call('POST', `/api/games/${gameId}/bid`, { auction: 'x', amount: 5 }, token)).status).toBe(409);
   });
 
+  it('lets a player continue on another device with name + PIN', async () => {
+    await start();
+    const host = await call<JoinResponse>('POST', '/api/games', { name: 'Pin', playerName: 'Anna', pin: '4321', settings: { mapSize: 48, seed: 2 } });
+    const { gameId } = host.data;
+    expect((await call('POST', '/api/games', { name: 'x', playerName: 'Bram', pin: '12' })).data).toEqual({ error: 'pin_invalid' });
+
+    // Same name, right PIN: the same company and token.
+    const again = await call<JoinResponse>('POST', `/api/games/${gameId}/join`, { name: 'anna', pin: '4321' });
+    expect(again.data).toMatchObject({ playerId: host.data.playerId, token: host.data.token, rejoined: true });
+    // Without or with a wrong PIN: refused.
+    expect((await call('POST', `/api/games/${gameId}/join`, { name: 'Anna' })).data).toEqual({ error: 'name_taken_pin' });
+    expect((await call('POST', `/api/games/${gameId}/join`, { name: 'Anna', pin: '0000' })).data).toEqual({ error: 'pin_wrong' });
+    for (let i = 0; i < 3; i++) await call('POST', `/api/games/${gameId}/join`, { name: 'Anna', pin: '0000' });
+    // Five wrong attempts: a pause, even for the right PIN.
+    expect((await call('POST', `/api/games/${gameId}/join`, { name: 'Anna', pin: '4321' })).status).toBe(429);
+
+    // A player without PIN sets one, and can then continue elsewhere.
+    const bram = await call<JoinResponse>('POST', `/api/games/${gameId}/join`, { name: 'Bram' });
+    let view = (await call<ClientView>('GET', `/api/games/${gameId}/view`, undefined, bram.data.token)).data;
+    expect(view.you?.hasPin).toBe(false);
+    expect((await call('POST', `/api/games/${gameId}/pin`, { pin: '2468' }, bram.data.token)).status).toBe(200);
+    view = (await call<ClientView>('GET', `/api/games/${gameId}/view`, undefined, bram.data.token)).data;
+    expect(view.you?.hasPin).toBe(true);
+    expect((await call<JoinResponse>('POST', `/api/games/${gameId}/join`, { name: 'Bram', pin: '2468' })).data.token).toBe(bram.data.token);
+    // The PIN is not part of what other players see.
+    expect(JSON.stringify(view)).not.toContain('2468');
+  });
+
   it('survives malformed requests', async () => {
     const dist = mkdtempSync(path.join(tmpdir(), 'client-dist-'));
     writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>t</title>');
@@ -208,6 +236,11 @@ describe('API', () => {
     expect((await fetch(`${base}/%E0%A4%A`)).status).toBe(404);
     const bad = await fetch(`${base}/api/games`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{nope' });
     expect(bad.status).toBe(400);
+    // One address can't create endless games (the server may be reachable from the internet).
+    const statuses: number[] = [];
+    for (let i = 0; i < 21; i++) statuses.push((await call('POST', '/api/games', { name: 'x', playerName: `P${i}`, settings: { mapSize: 48 } })).status);
+    expect(statuses.slice(0, 19).every((s) => s === 200)).toBe(true);
+    expect(statuses[20]).toBe(429);
     // Still alive.
     expect((await fetch(`${base}/api/health`)).status).toBe(200);
   });

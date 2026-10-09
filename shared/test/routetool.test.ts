@@ -1,53 +1,50 @@
 import { describe, expect, it } from 'vitest';
-import { World, extendRoutePath, findRoute, resolveTurn, stationLinked, straightLine } from '../src';
+import { World, addRoutePoint, findRoute, resolveTurn, stationLinked, straightLine } from '../src';
 import type { TransportKind } from '../src';
 import { addIndustry, hPath, makeWorld, slots } from './helpers';
 
-/** Follows the pointer over the given tiles like the route tool does. */
-function draw(world: World, kind: TransportKind, tiles: number[]): number[] {
+/** Taps the given points one after another, like the route tool does. */
+function tap(world: World, kind: TransportKind, points: number[]): number[] {
   let path: number[] = [];
-  for (const t of tiles) path = extendRoutePath(world, 'A', kind, path, t);
+  for (const t of points) {
+    const r = addRoutePoint(world, 'A', kind, path, t);
+    if (!r.ok) throw new Error(r.error);
+    path = r.path;
+  }
   return path;
 }
 
 describe('route tool', () => {
-  it('draws a straight line between two taps, with as few segments as possible', () => {
+  it('connects two points with a straight line, with as few segments as possible', () => {
     const w = makeWorld({ width: 30, height: 20 });
     expect(straightLine(w.map, w.at(2, 2), w.at(8, 5))).toHaveLength(7);
     const world = new World(w.map, w.state);
-    const path = draw(world, 'road', [w.at(2, 2), w.at(8, 2)]);
-    expect(path).toEqual(hPath(w, 2, 8, 2));
+    expect(tap(world, 'road', [w.at(2, 2), w.at(8, 2)])).toEqual(hPath(w, 2, 8, 2));
+    // Diagonal steps count as one segment each.
+    expect(tap(world, 'road', [w.at(2, 2), w.at(6, 6)])).toHaveLength(5);
   });
 
-  it('follows the pointer, cuts L-shaped corners and takes back what the pointer goes back over', () => {
+  it('runs exactly through every tapped point', () => {
     const w = makeWorld({ width: 30, height: 20 });
     const world = new World(w.map, w.state);
-    // Right, right, then down: the corner (4, 2) becomes a diagonal step.
-    const path = draw(world, 'road', [w.at(2, 2), w.at(3, 2), w.at(4, 2), w.at(4, 3), w.at(4, 4)]);
-    expect(path).toEqual([w.at(2, 2), w.at(3, 2), w.at(4, 3), w.at(4, 4)]);
-    // Going back over the route removes the end again.
-    expect(extendRoutePath(world, 'A', 'road', path, w.at(3, 2))).toEqual([w.at(2, 2), w.at(3, 2)]);
+    const path = tap(world, 'rail', [w.at(2, 2), w.at(6, 2), w.at(6, 6)]);
+    expect(path).toEqual([...hPath(w, 2, 6, 2), w.at(6, 3), w.at(6, 4), w.at(6, 5), w.at(6, 6)]);
   });
 
-  it('goes around an obstacle and stops at one it can not pass', () => {
+  it('goes around an obstacle, refuses one as a point and may not cross itself', () => {
     const w = makeWorld({ width: 30, height: 20 });
     addIndustry(w, 'farm', 5, 4);
     const world = new World(w.map, w.state);
-    const around = draw(world, 'rail', [w.at(2, 5), w.at(9, 5)]);
-    expect(around[0]).toBe(w.at(2, 5));
-    expect(around[around.length - 1]).toBe(w.at(9, 5));
-    expect(around.every((t) => w.map.use[t] === 0)).toBe(true);
-    // The pointer on the industry itself: the route stays where it was.
-    const start = draw(world, 'rail', [w.at(2, 5)]);
-    expect(extendRoutePath(world, 'A', 'rail', start, w.at(5, 5))).toBe(start);
-  });
-
-  it('keeps a bend that joins the existing network', () => {
-    const w = makeWorld({ width: 30, height: 20 });
-    const built = resolveTurn(w.map, w.state, { A: slots({ type: 'build', kind: 'road', path: [w.at(4, 2), w.at(4, 1)] }) }, 0);
-    const world = new World(w.map, built.state);
-    const path = draw(world, 'road', [w.at(2, 2), w.at(3, 2), w.at(4, 2), w.at(4, 3)]);
-    expect(path).toContain(w.at(4, 2));
+    const start = [w.at(2, 5)];
+    const around = addRoutePoint(world, 'A', 'rail', start, w.at(9, 5));
+    expect(around.ok && around.detour).toBe(true);
+    if (around.ok) {
+      expect(around.path[around.path.length - 1]).toBe(w.at(9, 5));
+      expect(around.path.every((t) => w.map.use[t] === 0)).toBe(true);
+    }
+    expect(addRoutePoint(world, 'A', 'rail', start, w.at(5, 5))).toEqual({ ok: false, error: 'blocked' });
+    const loop = tap(world, 'road', [w.at(10, 10), w.at(14, 10), w.at(14, 12)]);
+    expect(addRoutePoint(world, 'A', 'road', loop, w.at(12, 8))).toEqual({ ok: false, error: 'crossing' });
   });
 });
 

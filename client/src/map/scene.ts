@@ -38,9 +38,12 @@ export type ToolOverlay =
   | {
       kind: 'route';
       transport: TransportKind;
-      start: number | null;
-      /** Route from the start to the hovered tile. */
+      /** The tapped points (the first is the start). */
+      points: number[];
+      /** The route so far (at least one segment). */
       path: number[] | null;
+      /** With a mouse: what the next click would add (from the end of the route to the pointer). */
+      ghost: number[] | null;
       blocked: number[];
       label: string | null;
       ok: boolean;

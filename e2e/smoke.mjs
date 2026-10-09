@@ -68,7 +68,12 @@ try {
     console.error('[e2e] page error:', e.message);
   });
   await page.goto(BASE + '/');
+  // New visitors land on joining; creating a game is one click further.
+  check(await page.getByRole('heading', { name: 'Meedoen met een spel' }).isVisible(), 'the start screen opens with joining a game');
+  await page.screenshot({ path: path.join(shots, '00-landing.png') });
+  await page.getByRole('button', { name: /Nieuw spel maken/ }).click();
   await page.getByPlaceholder('bv. Rail & Co').fill('Rail & Co');
+  await page.locator('.card', { hasText: 'Nieuw spel' }).getByLabel(/pincode/i).fill('1234');
   await page.getByLabel('Naam van het spel').fill('E2E-spel');
   await page.getByLabel('Acties per beurt').selectOption('20');
   await page.locator('label.radio', { hasText: 'Alleen als de host' }).locator('input').check();
@@ -194,8 +199,8 @@ try {
   await page.getByRole('button', { name: 'Start het spel' }).click();
   await page.waitForTimeout(600);
 
-  // A road between the tiles next to the two loading points: click the start, move to the end and click.
-  // It goes straight into the free slots, one action per tile.
+  // A road between the tiles next to the two loading points: tap A, tap B, check the preview, tap ✓.
+  // It goes into the free slots, one action per tile.
   const towards = (from, to) => {
     const [fx, fy] = xy(from);
     const [tx, ty] = xy(to);
@@ -209,10 +214,13 @@ try {
   const [ex, ey] = await clientPos(roadEnd);
   await page.mouse.move(ex, ey);
   await page.waitForTimeout(300);
-  await page.screenshot({ path: path.join(shots, '03-plan-road.png') });
   await page.mouse.click(ex, ey);
-  await page.waitForTimeout(400);
-  check((await page.getByRole('button', { name: 'Bekijken' }).getAttribute('aria-pressed')) === 'true', 'route tool closes after the second click');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join(shots, '03-plan-road.png') });
+  check((await page.getByRole('button', { name: 'Weg' }).getAttribute('aria-pressed')) === 'true', 'after A and B the route waits for the check mark');
+  await page.getByRole('button', { name: 'Route plannen' }).click();
+  await page.waitForTimeout(300);
+  check((await page.getByRole('button', { name: 'Bekijken' }).getAttribute('aria-pressed')) === 'true', 'the check mark plans the route and closes the tool');
   await saved();
 
   view = await api('GET', `/api/games/${gameId}/view`, undefined, await identity());
@@ -299,6 +307,7 @@ try {
     await page.getByRole('button', { name: 'Weg' }).click();
     await clickTile(parallel[0]);
     await clickTile(parallel[parallel.length - 1]);
+    await page.getByRole('button', { name: 'Route plannen' }).click();
     await saved();
   } else log('no free room for the conflict scenario, skipping it');
 
@@ -369,7 +378,7 @@ try {
   view = await api('GET', `/api/games/${gameId}/view`);
   check(view.game.alliances.length === 1, 'alliance accepted through the UI');
 
-  // Drawing with the mouse: the road follows the tiles the pointer passes (an L-shaped bend becomes a diagonal).
+  // More points make bends; the route runs exactly through every point. A tap on the route goes back to it.
   view = await api('GET', `/api/games/${gameId}/view`);
   const taken = (t) => !!view.game.infra.tiles[t] || view.game.stations.some((st) => st.tile === t) || view.game.players.some((p) => p.hq === t);
   let corner = null;
@@ -391,37 +400,20 @@ try {
     await page.getByRole('tab', { name: /Acties/ }).click();
     await page.getByRole('button', { name: 'Weg' }).click();
     await focus(tileOf(x0 + 2, y0 + 2));
-    await clickTile(tileOf(x0, y0));
-    for (const [dx, dy] of [[1, 0], [2, 0], [3, 0], [3, 1], [3, 2], [3, 3]]) {
-      const [px, py] = await clientPos(tileOf(x0 + dx, y0 + dy));
-      await page.mouse.move(px, py, { steps: 2 });
-      await page.waitForTimeout(40);
-    }
+    for (const [dx, dy] of [[0, 0], [3, 0], [3, 3]]) await clickTile(tileOf(x0 + dx, y0 + dy));
+    // With the mouse over another tile, the next piece shows dashed.
+    const [gx, gy] = await clientPos(tileOf(x0, y0 + 3));
+    await page.mouse.move(gx, gy);
     await page.waitForTimeout(200);
-    await page.screenshot({ path: path.join(shots, '10c-draw-road.png') });
+    await page.screenshot({ path: path.join(shots, '10c-route-points.png') });
     const drawn = await page.evaluate(() => window.__transportrijk.route());
-    check(
-      drawn.includes(tileOf(x0 + 2, y0)) && drawn.includes(tileOf(x0 + 3, y0 + 2)) && drawn[drawn.length - 1] === tileOf(x0 + 3, y0 + 3) && drawn.length === 6,
-      `the road follows the mouse (${drawn.length - 1} pieces for an L of 6)`,
-    );
-    await page.locator('.tool-panel').getByRole('button', { name: 'Annuleren' }).click();
-
-    // Dragging from the start draws the road too; letting go plans it.
-    await page.getByRole('button', { name: 'Weg' }).click();
-    await clickTile(tileOf(x0, y0 + 3));
-    const [dx0, dy0] = await clientPos(tileOf(x0, y0 + 3));
-    await page.mouse.move(dx0, dy0);
-    await page.mouse.down();
-    for (const dx of [1, 2, 3]) {
-      const [px, py] = await clientPos(tileOf(x0 + dx, y0 + 3));
-      await page.mouse.move(px, py, { steps: 3 });
-    }
-    await page.mouse.up();
-    await saved();
-    const dragged = (await api('GET', `/api/games/${gameId}/view`, undefined, await identity())).orders.slots.filter(Boolean);
-    check(dragged.length === 3 && dragged.every((a) => a.type === 'build'), `dragging plans the road (${dragged.length} actions)`);
-    await page.getByRole('button', { name: 'Alle acties wissen' }).click();
-    await saved();
+    const expected = [[0, 0], [1, 0], [2, 0], [3, 0], [3, 1], [3, 2], [3, 3]].map(([dx, dy]) => tileOf(x0 + dx, y0 + dy));
+    check(JSON.stringify(drawn) === JSON.stringify(expected), 'the route runs exactly through the tapped points');
+    await clickTile(tileOf(x0 + 3, y0 + 1));
+    check((await page.evaluate(() => window.__transportrijk.route())).length === 5, 'a tap on the route takes it back to that tile');
+    await page.getByRole('button', { name: 'Laatste punt terug' }).click();
+    check((await page.evaluate(() => window.__transportrijk.route())).length === 4, 'the undo button takes the last point back');
+    await page.getByRole('button', { name: 'Annuleren' }).click();
   } else log('no free area to draw in, skipping that check');
 
   // Auctions: after turn 10 three run at the same time; a share we win glows green on the map.
@@ -447,6 +439,35 @@ try {
   await focus(tileOf(share.x, share.y));
   await page.waitForTimeout(2600);
   await page.screenshot({ path: path.join(shots, '14-share-glow.png') });
+
+  // --- a friend opens the game link (from the address bar) on a phone: first the join form, not the map ---
+  const friendPhone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const friend = await friendPhone.newPage();
+  await friend.goto(`${BASE}/#/game/${gameId}`);
+  await friend.getByRole('heading', { name: 'Je bent uitgenodigd' }).waitFor();
+  await friend.screenshot({ path: path.join(shots, '15-join-gate.png') });
+  check(!(await friend.locator('canvas').count()), 'a game link opens the join form for a new player');
+  await friend.getByLabel('Jouw bedrijfsnaam').fill('Vriend & Co');
+  await friend.getByLabel(/pincode/i).fill('2580');
+  await friend.getByRole('button', { name: 'Meedoen' }).tap();
+  await friend.locator('canvas').waitFor();
+  view = await api('GET', `/api/games/${gameId}/view`);
+  const friendPlayer = view.game.players.find((p) => p.name === 'Vriend & Co');
+  check(!!friendPlayer, 'the friend joined and sees the game');
+
+  // On another device (or a new link): tap the name, enter the PIN and continue as the same company.
+  const otherDevice = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const other = await otherDevice.newPage();
+  await other.goto(`${BASE}/#/join/${gameId}`);
+  await other.locator('.chip', { hasText: 'Vriend & Co' }).tap();
+  await other.getByLabel(/pincode/i).fill('2580');
+  await other.screenshot({ path: path.join(shots, '16-rejoin.png') });
+  await other.getByRole('button', { name: 'Verder spelen als Vriend & Co' }).tap();
+  await other.locator('canvas').waitFor();
+  const otherIds = await other.evaluate(() => JSON.parse(localStorage.getItem('transportrijk.identities')));
+  check(otherIds[0]?.playerId === friendPlayer?.id, 'name + PIN continue as the same company on another device');
+  await friendPhone.close();
+  await otherDevice.close();
 
   // --- phone: the rival opens the game on a small touch screen --------------------------
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -494,10 +515,11 @@ try {
       await mobile.touchscreen.tap(x, y);
       await mobile.waitForTimeout(250);
     }
-    await mobile.waitForTimeout(900);
     await mobile.screenshot({ path: path.join(shots, '13-mobile-track.png') });
+    await mobile.getByRole('button', { name: 'Route plannen' }).tap();
+    await mobile.waitForTimeout(900);
     const rivalOrders = (await api('GET', `/api/games/${gameId}/view`, undefined, rival.token)).orders.slots.filter(Boolean);
-    check(rivalOrders.length === track.length - 1 && rivalOrders.every((a) => a.type === 'build' && a.kind === 'rail'), `tap, tap: a straight track (${rivalOrders.length} actions)`);
+    check(rivalOrders.length === track.length - 1 && rivalOrders.every((a) => a.type === 'build' && a.kind === 'rail'), `tap A, tap B, ✓: a straight track (${rivalOrders.length} actions)`);
   } else log('no room for the touch track check');
 } finally {
   await browser.close();
